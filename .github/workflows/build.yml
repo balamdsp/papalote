@@ -1,12 +1,10 @@
 name: Build
-
 on:
   push:
     branches: [ main, master ]
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
-
 jobs:
   build:
     name: Build (${{ matrix.name }})
@@ -24,11 +22,9 @@ jobs:
           - name: linux
             os: ubuntu-latest
             configure: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPAPALOTE_COPY_AFTER_BUILD=OFF
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -41,13 +37,10 @@ jobs:
             libxinerama-dev libxrandr-dev libxrender-dev \
             libxkbcommon-dev libxkbcommon-x11-dev \
             libglu1-mesa-dev mesa-common-dev libgtk-3-dev
-
       - name: Configure
         run: ${{ matrix.configure }}
-
       - name: Build
         run: cmake --build build --config Release --parallel
-
       - name: Upload artifacts (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -56,7 +49,6 @@ jobs:
           path: |
             build/Papalote_artefacts/Release/VST3/Papalote.vst3
             build/Papalote_artefacts/Release/Standalone/Papalote.exe
-
       - name: Upload artifacts (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
@@ -65,7 +57,6 @@ jobs:
           path: |
             build/Papalote_artefacts/Release/VST3/Papalote.vst3
             build/Papalote_artefacts/Release/Standalone/Papalote.app
-
       - name: Upload artifacts (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -74,12 +65,10 @@ jobs:
           path: |
             build/Papalote_artefacts/Release/VST3/Papalote.vst3
             build/Papalote_artefacts/Release/Standalone/Papalote
-
   release:
     name: Release
     permissions:
       contents: write
-    # UPDATED: Now allows manual triggering via workflow_dispatch
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
@@ -88,14 +77,21 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
-
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Zip per-platform folders
         run: |
           cd dist
           for d in Papalote-*/; do
-            (cd "$d" && zip -qr "../${d%/}.zip" .)
+            (cd "$d" && zip -qr "../${d%/}-${{ steps.version.outputs.version }}.zip" .)
           done
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
