@@ -1,0 +1,7 @@
+build/
+Releases/
+.vs
+.code-workspace
+*.user
+*.sh
+tests/*.exe

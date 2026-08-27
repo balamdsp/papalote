@@ -1,0 +1,103 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            configure: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPAPALOTE_COPY_AFTER_BUILD=OFF
+          - name: macos
+            os: macos-latest
+            configure: cmake -B build -G Xcode -DCMAKE_BUILD_TYPE=Release -DPAPALOTE_COPY_AFTER_BUILD=OFF -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          - name: linux
+            os: ubuntu-latest
+            configure: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPAPALOTE_COPY_AFTER_BUILD=OFF
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libjack-jackd2-dev \
+            ladspa-sdk libcurl4-openssl-dev \
+            libfontconfig1-dev libfreetype-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libglu1-mesa-dev mesa-common-dev libgtk-3-dev
+
+      - name: Configure
+        run: ${{ matrix.configure }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Papalote-windows
+          path: |
+            build/Papalote_artefacts/Release/VST3/Papalote.vst3
+            build/Papalote_artefacts/Release/Standalone/Papalote.exe
+
+      - name: Upload artifacts (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Papalote-macos
+          path: |
+            build/Papalote_artefacts/Release/VST3/Papalote.vst3
+            build/Papalote_artefacts/Release/Standalone/Papalote.app
+
+      - name: Upload artifacts (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Papalote-linux
+          path: |
+            build/Papalote_artefacts/Release/VST3/Papalote.vst3
+            build/Papalote_artefacts/Release/Standalone/Papalote
+
+  release:
+    name: Release
+    permissions:
+      contents: write
+    # UPDATED: Now allows manual triggering via workflow_dispatch
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Zip per-platform folders
+        run: |
+          cd dist
+          for d in Papalote-*/; do
+            (cd "$d" && zip -qr "../${d%/}.zip" .)
+          done
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') }}
