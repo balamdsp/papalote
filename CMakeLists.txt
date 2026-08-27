@@ -1,10 +1,28 @@
 cmake_minimum_required(VERSION 3.22)
 project(Papalote VERSION 0.7)
 
-# A local JUCE checkout is used when available (dev machines); otherwise
-# JUCE 9.0.1 is fetched automatically (CI). Point PAPALOTE_JUCE_PATH at
-# your JUCE via -DPAPALOTE_JUCE_PATH=<path> if it lives somewhere else.
-set(PAPALOTE_JUCE_PATH "F:/Apps/Scoop/apps/juce/current" CACHE PATH "Local JUCE checkout")
+# Check for environment variable first, then fallback to variable passed via CLI (-DPAPALOTE_JUCE_PATH=...)
+if(DEFINED ENV{PAPALOTE_JUCE_PATH} AND NOT DEFINED PAPALOTE_JUCE_PATH)
+    set(PAPALOTE_JUCE_PATH "$ENV{PAPALOTE_JUCE_PATH}" CACHE PATH "Path to local JUCE installation")
+else()
+    set(PAPALOTE_JUCE_PATH "" CACHE PATH "Path to local JUCE installation")
+endif()
+
+# Fetch JUCE automatically if no valid local path is provided or if the path doesn't exist
+if(NOT PAPALOTE_JUCE_PATH OR NOT EXISTS "${PAPALOTE_JUCE_PATH}")
+    message(STATUS "Local JUCE not specified or not found -- fetching JUCE 9.0.1 via FetchContent")
+    
+    include(FetchContent)
+    FetchContent_Declare(
+        JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG        9.0.1
+    )
+    FetchContent_MakeAvailable(JUCE)
+else()
+    message(STATUS "Using local JUCE from: ${PAPALOTE_JUCE_PATH}")
+    add_subdirectory("${PAPALOTE_JUCE_PATH}" juce)
+endif()
 
 if (EXISTS "${PAPALOTE_JUCE_PATH}")
     add_subdirectory("${PAPALOTE_JUCE_PATH}" juce_build)
