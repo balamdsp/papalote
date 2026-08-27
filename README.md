@@ -29,7 +29,7 @@ Formats: **VST3** + **Standalone** (JUCE 9, CMake).
 - All parameters are host-automatable.
 
 ### Interface
-- Fixed 800×360 amber CRT panel with a toggleable **CRT overlay**
+- Fixed amber CRT panel with a toggleable **CRT overlay**
   (curvature, phosphor glow, noise, bezel) based on cool-retro-term.
 
 ## Building
