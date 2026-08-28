@@ -45,24 +45,24 @@ target_compile_definitions(Papalote
 
 target_sources(Papalote
     PRIVATE
-        Source/CustomLookAndFeel.h
-        Source/SaturationCurves.h
-        Source/SaturationCurves.cpp
-        Source/TapeEmulation.cpp
-        Source/TapeEmulation.h
-        Source/PluginProcessor.h
-        Source/PluginProcessor.cpp
-        Source/PluginEditor.cpp
-        Source/PluginEditor.h
-        Source/PresetManager.h
-        Source/PresetManager.cpp
+        source/CustomLookAndFeel.h
+        source/SaturationCurves.h
+        source/SaturationCurves.cpp
+        source/TapeEmulation.cpp
+        source/TapeEmulation.h
+        source/PluginProcessor.h
+        source/PluginProcessor.cpp
+        source/PluginEditor.cpp
+        source/PluginEditor.h
+        source/PresetManager.h
+        source/PresetManager.cpp
 )
 
 juce_add_binary_data(Papalote_BinaryData
     HEADER_NAME "BinaryData.h"
     NAMESPACE "BinaryData"
     SOURCES
-        Source/VT323-Regular.ttf
+        source/VT323-Regular.ttf
 )
 
 target_link_libraries(Papalote PRIVATE Papalote_BinaryData)
