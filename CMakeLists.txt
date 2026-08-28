@@ -1,64 +1,38 @@
 cmake_minimum_required(VERSION 3.22)
-project(Papalote VERSION 0.7)
+project(Papalote VERSION 0.8.0)
 
-# Check for environment variable first, then fallback to variable passed via CLI (-DPAPALOTE_JUCE_PATH=...)
-if(DEFINED ENV{PAPALOTE_JUCE_PATH} AND NOT DEFINED PAPALOTE_JUCE_PATH)
-    set(PAPALOTE_JUCE_PATH "$ENV{PAPALOTE_JUCE_PATH}" CACHE PATH "Path to local JUCE installation")
-else()
-    set(PAPALOTE_JUCE_PATH "" CACHE PATH "Path to local JUCE installation")
-endif()
+include(FetchContent)
+FetchContent_Declare(
+    JUCE
+    GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+    GIT_TAG        9.0.1
+)
+FetchContent_MakeAvailable(JUCE)
 
-# Fetch JUCE automatically if no valid local path is provided or if the path doesn't exist
-if(NOT PAPALOTE_JUCE_PATH OR NOT EXISTS "${PAPALOTE_JUCE_PATH}")
-    message(STATUS "Local JUCE not specified or not found -- fetching JUCE 9.0.1 via FetchContent")
-    
-    include(FetchContent)
-    FetchContent_Declare(
-        JUCE
-        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG        9.0.1
-    )
-    FetchContent_MakeAvailable(JUCE)
-else()
-    message(STATUS "Using local JUCE from: ${PAPALOTE_JUCE_PATH}")
-    add_subdirectory("${PAPALOTE_JUCE_PATH}" juce)
-endif()
+add_subdirectory(libs/clap-juce-extensions EXCLUDE_FROM_ALL)
 
-if (EXISTS "${PAPALOTE_JUCE_PATH}")
-    add_subdirectory("${PAPALOTE_JUCE_PATH}" juce_build)
-else()
-    message(STATUS "PAPALOTE_JUCE_PATH '${PAPALOTE_JUCE_PATH}' not found -- fetching JUCE 9.0.1")
-    include(FetchContent)
-    FetchContent_Declare(JUCE
-        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG 9.0.1
-        GIT_SHALLOW TRUE)
-    FetchContent_MakeAvailable(JUCE)
-endif()
-
-# Copy the built VST3 into the system plugin folder after every successful
-# build. JUCE reads these as INHERITED target properties during
-# juce_add_plugin, so they must be set at GLOBAL scope BEFORE that call.
-# CI disables this with -DPAPALOTE_COPY_AFTER_BUILD=OFF.
 option(PAPALOTE_COPY_AFTER_BUILD "Copy built plugins into the system plugin folders" ON)
 
 if (PAPALOTE_COPY_AFTER_BUILD)
     set_property(GLOBAL PROPERTY JUCE_COPY_PLUGIN_AFTER_BUILD TRUE)
-    set_property(GLOBAL PROPERTY JUCE_VST3_COPY_DIR "C:/Program Files/Common Files/VST3/BalamDSP")
 endif()
 
 juce_add_plugin(Papalote
     COMPANY_NAME "BalamDSP"
     PLUGIN_MANUFACTURER_CODE "Bala"
     PLUGIN_CODE "Papa"
-    FORMATS Standalone VST3 # JUCE has no native CLAP support
+    FORMATS Standalone VST3 AU
     PRODUCT_NAME "Papalote"
-    VERSION ${PROJECT_VERSION} # single source of truth: project(VERSION) above
+    VERSION ${PROJECT_VERSION} 
     PLUGIN_DESCRIPTION "Dirt Saturator"
     VST3_CATEGORIES "Distortion" "Fx"
     LV2URI "https://balamdsp.com/plugins/Papalote"
-    AAX_CATEGORY "8192"
+    AAX_CATEGORY "AAX_ePlugInCategory_Harmonic"
 )
+
+clap_juce_extensions_plugin(TARGET Papalote
+    CLAP_ID "com.balamdsp.Papalote"
+    CLAP_FEATURES "audio-effect")
 
 juce_generate_juce_header(Papalote)
 
@@ -66,28 +40,29 @@ target_compile_definitions(Papalote
     PUBLIC
         JUCE_STRICT_REFCOUNTEDPOINTER=1
         JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_WIN_PER_MONITOR_DPI_AWARE=0
 )
 
 target_sources(Papalote
     PRIVATE
-        source/CustomLookAndFeel.h
-        source/SaturationCurves.h
-        source/SaturationCurves.cpp
-        source/TapeEmulation.cpp
-        source/TapeEmulation.h
-        source/PluginProcessor.h
-        source/PluginProcessor.cpp
-        source/PluginEditor.cpp
-        source/PluginEditor.h
-        source/PresetManager.h
-        source/PresetManager.cpp
+        Source/CustomLookAndFeel.h
+        Source/SaturationCurves.h
+        Source/SaturationCurves.cpp
+        Source/TapeEmulation.cpp
+        Source/TapeEmulation.h
+        Source/PluginProcessor.h
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp
+        Source/PluginEditor.h
+        Source/PresetManager.h
+        Source/PresetManager.cpp
 )
 
 juce_add_binary_data(Papalote_BinaryData
     HEADER_NAME "BinaryData.h"
     NAMESPACE "BinaryData"
     SOURCES
-        source/VT323-Regular.ttf
+        Source/VT323-Regular.ttf
 )
 
 target_link_libraries(Papalote PRIVATE Papalote_BinaryData)

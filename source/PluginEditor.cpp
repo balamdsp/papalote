@@ -3,58 +3,91 @@
 #include "AudioSettingsPanel.h"
 #include "AboutWindow.h"
 
+#include <cmath>
+#include <limits>
+
 #if JucePlugin_Build_Standalone
 #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
 #endif
 
 static constexpr int W = 800;
 static constexpr int H = 460;
-
-static constexpr int TOP_BAR_H = 77;
-
-static constexpr int BODY_TOP = TOP_BAR_H + 10;
-static constexpr int BODY_H   = H - TOP_BAR_H;
-
-static constexpr int FADER_OUTER = 60;
-static constexpr int FADER_W     = 56;
-static constexpr int FADER_GAP   = 12;
-static constexpr int BODY_X      = FADER_OUTER + FADER_W + FADER_GAP;
-static constexpr int BODY_W      = W - BODY_X * 2;
-
-static constexpr int CARD_PAD = 14;
 static constexpr int NUM_ROWS = 3;
 
-static constexpr int TAG_Y       = 83;
-static constexpr int TAG_H       = 18;
-static constexpr int LABEL_EXTRA = 28;
-static constexpr int DB_LABEL_H  = 22;
-static constexpr int DB_GAP_ABOVE = 37;
+static bool isInStandaloneApp (const juce::Component* c);
 
-static constexpr int FOOTER_H = 70;
-
-struct CardMetrics
+// TEMP DIAGNOSTIC: emit timestamps/markers via OutputDebugString for debugview++.
+static void logZoomDiag (const juce::String& tag, float uiScale, const juce::Component* editor)
 {
-    static constexpr int contentInset = 22;
-    static constexpr int footerGap    = 16;
-    static constexpr int matLabelW    = 80;
-    static constexpr int matComboW    = 112;
-    static constexpr int osLabelW     = 108;
-    static constexpr int osComboW     = 74;
-    static constexpr int bypassW      = 100;
+    try
+    {
+        juce::String line ("PAPALOTE: ");
+        line << tag << " uiScale=" << uiScale
+             << " editor=" << (editor != nullptr ? juce::String (editor->getWidth()) : "-1")
+                            << "x" << (editor != nullptr ? juce::String (editor->getHeight()) : "-1")
+             << " scale=" << (editor != nullptr ? editor->getTransform().getScaleFactor() : -1.0f);
+        if (editor != nullptr)
+        {
+            if (auto* tl = editor->getTopLevelComponent())
+                line << " top=" << tl->getWidth() << "x" << tl->getHeight();
+            if (auto* peer = editor->getPeer())
+                line << " peerScale=" << juce::String (peer->getPlatformScaleFactor());
+            line << " deskScale=" << juce::String (editor->getDesktopScaleFactor());
+        }
+        juce::Logger::outputDebugString (line);
 
-    static constexpr int titleH  = 26;
-    static constexpr int labelH  = 26;
-    static constexpr int sliderH = 44;
-    static constexpr int rowGap  = 8;
+        juce::File logFile (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("papalote_zoom_diag.txt"));
+        logFile.appendText (line + "\n");
+    }
+    catch (...) {}
+}
 
-    static constexpr int totalFooterW = matLabelW + matComboW + footerGap
-                                      + osLabelW  + osComboW  + footerGap + bypassW;
-    static constexpr int cardW      = totalFooterW;
-    static constexpr int cardX      = BODY_X + (BODY_W - cardW) / 2;
-    static constexpr int cardY      = TAG_Y + 15;
-    static constexpr int cardH      = titleH + NUM_ROWS * (labelH + sliderH)
-                                      + (NUM_ROWS - 1) * rowGap + contentInset;
-    static constexpr int cardBottom = cardY + cardH;
+// Scale-aware layout metrics. All values are the fixed logical sizes scaled
+// by the zoom factor; instantiate with the current uiScale.
+struct Metrics
+{
+    explicit Metrics (float s) : scale (s) {}
+
+    float scale = 1.0f;
+    int sc (float v) const { return juce::roundToInt (v * scale); }
+
+    int TOP_BAR_H   = sc (77.0f);
+    int BODY_TOP    = sc (87.0f);
+    int BODY_H      = sc (383.0f);
+    int FADER_OUTER = sc (60.0f);
+    int FADER_W     = sc (56.0f);
+    int FADER_GAP   = sc (12.0f);
+    int BODY_X      = sc (128.0f);
+    int BODY_W      = sc (544.0f);
+    int CARD_PAD    = sc (14.0f);
+    int TAG_Y       = sc (83.0f);
+    int TAG_H       = sc (18.0f);
+    int LABEL_EXTRA = sc (28.0f);
+    int DB_LABEL_H  = sc (22.0f);
+    int DB_GAP_ABOVE = sc (37.0f);
+    int FOOTER_H    = sc (70.0f);
+
+    int contentInset = sc (22.0f);
+    int footerGap    = sc (16.0f);
+    int matLabelW    = sc (80.0f);
+    int matComboW    = sc (112.0f);
+    int osLabelW     = sc (108.0f);
+    int osComboW     = sc (74.0f);
+    int bypassW      = sc (100.0f);
+    int titleH       = sc (26.0f);
+    int labelH       = sc (26.0f);
+    int sliderH      = sc (44.0f);
+    int rowGap       = sc (8.0f);
+
+    int totalFooterW = matLabelW + matComboW + footerGap
+                     + osLabelW + osComboW + footerGap + bypassW;
+    int cardW      = totalFooterW;
+    int cardX      = BODY_X + (BODY_W - cardW) / 2;
+    int cardY      = TAG_Y + sc (15.0f);
+    int cardH      = titleH + NUM_ROWS * (labelH + sliderH)
+                   + (NUM_ROWS - 1) * rowGap + contentInset;
+    int cardBottom = cardY + cardH;
 };
 
 PapaloteAudioProcessorEditor::ScreenContent::ScreenContent()
@@ -74,113 +107,121 @@ void PapaloteAudioProcessorEditor::ScreenContent::paint (juce::Graphics& g)
 
     const int w = getWidth();
     const int h = getHeight();
+    const float s = (float) w / (float) W;
+    const Metrics m (s);
+    const auto mf = [] (float size, float s) { return CustomLookAndFeel::makeFont (size * s); };
 
     g.fillAll (background);
 
     drawScanlines (g, { 0, 0, w, h }, juce::Colours::black.withAlpha (0.22f));
 
     g.setColour (body);
-    g.fillRect (0, 0, w, TOP_BAR_H);
+    g.fillRect (0, 0, w, m.TOP_BAR_H);
 
     {
-        const int titleX = 18;
+        const int titleX = m.sc (18.0f);
 
         g.setColour (textBrand);
-        g.setFont (CustomLookAndFeel::makeFont (38.0f));
-        g.drawText ("PAPALOTE...", titleX, 12, 260, 32,
+        g.setFont (mf (38.0f, s));
+        g.drawText ("PAPALOTE...", titleX, m.sc (12.0f), m.sc (260.0f), m.sc (32.0f),
                     juce::Justification::centredLeft, false);
 
         if (cursorVisible)
         {
-            const auto titleFont = CustomLookAndFeel::makeFont (38.0f);
+            const auto titleFont = mf (38.0f, s);
             const float bannerWidth = juce::GlyphArrangement::getStringWidth (titleFont, "PAPALOTE...");
             g.setColour (textBrand.withAlpha (0.85f));
-            g.fillRect ((float) titleX + bannerWidth + 4.0f, 18.0f, 8.0f, 28.0f);
+            g.fillRect ((float) titleX + bannerWidth + (float) m.sc (4.0f),
+                        (float) m.sc (18.0f), (float) m.sc (8.0f), (float) m.sc (28.0f));
         }
 
         g.setColour (textMid);
-        g.setFont (CustomLookAndFeel::makeFont (18.0f));
-        g.drawText ("DIRT SATURATOR", titleX, 46, 220, 18,
+        g.setFont (mf (18.0f, s));
+        g.drawText ("DIRT SATURATOR", titleX, m.sc (46.0f), m.sc (220.0f), m.sc (18.0f),
                     juce::Justification::centredLeft, false);
     }
 
     {
+        const int brandX = w - m.sc (120.0f);
+
         g.setColour (textBrand);
-        g.setFont (CustomLookAndFeel::makeFont (24.0f));
-        g.drawText ("BalamDSP", w - 120, 16, 100, 26,
+        g.setFont (mf (24.0f, s));
+        g.drawText ("BalamDSP", brandX, m.sc (16.0f), m.sc (100.0f), m.sc (26.0f),
                     juce::Justification::centredRight, false);
 
         g.setColour (textMid.withAlpha (0.55f));
-        g.setFont (CustomLookAndFeel::makeFont (22.0f));
-        g.drawText ("v" + juce::String (ProjectInfo::versionString), w - 120, 40, 100, 22,
+        g.setFont (mf (22.0f, s));
+        g.drawText ("v" + juce::String (ProjectInfo::versionString), brandX, m.sc (40.0f),
+                    m.sc (100.0f), m.sc (22.0f),
                     juce::Justification::centredRight, false);
     }
 
     {
-        using CM = CardMetrics;
-
         g.setColour (body);
-        g.fillRoundedRectangle ((float) BODY_X, (float) BODY_TOP,
-                                (float) BODY_W, (float) BODY_H, 6.0f);
+        g.fillRoundedRectangle ((float) m.BODY_X, (float) m.BODY_TOP,
+                                (float) m.BODY_W, (float) m.BODY_H, (float) m.sc (6.0f));
 
         g.setColour (card);
-        g.fillRoundedRectangle ((float) CM::cardX, (float) CM::cardY,
-                                (float) CM::cardW, (float) CM::cardH, 6.0f);
+        g.fillRoundedRectangle ((float) m.cardX, (float) m.cardY,
+                                (float) m.cardW, (float) m.cardH, (float) m.sc (6.0f));
 
         g.setColour (accent.withAlpha (0.08f));
-        g.drawRoundedRectangle ((float) CM::cardX + 0.5f, (float) CM::cardY + 0.5f,
-                                (float) CM::cardW - 1.0f, (float) CM::cardH - 1.0f, 6.0f, 1.0f);
+        g.drawRoundedRectangle ((float) m.cardX + 0.5f, (float) m.cardY + 0.5f,
+                                (float) m.cardW - 1.0f, (float) m.cardH - 1.0f,
+                                (float) m.sc (6.0f), 1.0f);
 
-        const int titleY = CM::cardY + 6;
+        const int titleY = m.cardY + m.sc (6.0f);
         g.setColour (textPrimary.withAlpha (0.70f));
-        g.setFont (CustomLookAndFeel::makeFont (18.0f));
+        g.setFont (mf (18.0f, s));
         g.drawText (">> MAIN PARAMETERS",
-                    CM::cardX + CM::contentInset / 2, titleY, CM::cardW - CM::contentInset, 20,
+                    m.cardX + m.contentInset / 2, titleY,
+                    m.cardW - m.contentInset, m.sc (20.0f),
                     juce::Justification::topLeft, false);
     }
 
     {
-        const int faderY0 = BODY_TOP + CARD_PAD;
-        const int faderH  = CardMetrics::cardBottom - 5 - faderY0;
-        const int dbTextY = faderY0 + faderH + DB_GAP_ABOVE;
+        const int faderY0 = m.BODY_TOP + m.CARD_PAD;
+        const int faderH  = m.cardBottom - m.sc (5.0f) - faderY0;
+        const int dbTextY = faderY0 + faderH + m.DB_GAP_ABOVE;
 
         auto drawFaderHeader = [&] (int faderX, const juce::String& tag)
         {
-            const int labelX = faderX - LABEL_EXTRA / 2;
-            const int labelW = FADER_W + LABEL_EXTRA;
+            const int labelX = faderX - m.LABEL_EXTRA / 2;
+            const int labelW = m.FADER_W + m.LABEL_EXTRA;
 
             g.setColour (textMid);
-            g.setFont (CustomLookAndFeel::makeFont (22.0f));
-            g.drawText (tag, labelX, faderY0 - TAG_H + 4, labelW, TAG_H,
+            g.setFont (mf (22.0f, s));
+            g.drawText (tag, labelX, faderY0 - m.TAG_H + m.sc (4.0f), labelW, m.TAG_H,
                         juce::Justification::centred, false);
 
             g.setColour (textMid.withAlpha (0.7f));
-            g.setFont (CustomLookAndFeel::makeFont (22.0f));
-            g.drawText ("dB", labelX, dbTextY, labelW, DB_LABEL_H,
+            g.setFont (mf (22.0f, s));
+            g.drawText ("dB", labelX, dbTextY, labelW, m.DB_LABEL_H,
                         juce::Justification::centred, false);
         };
 
-        drawFaderHeader (FADER_OUTER, "IN");
-        drawFaderHeader (w - FADER_OUTER - FADER_W, "OUT");
+        drawFaderHeader (m.FADER_OUTER, "IN");
+        drawFaderHeader (w - m.FADER_OUTER - m.FADER_W, "OUT");
 
         if (inputTrimSlider != nullptr && clipSlider != nullptr)
         {
-            const int valueY = faderY0 + faderH + 13;
+            const int valueY = faderY0 + faderH + m.sc (13.0f);
+            const int valueH = m.sc (24.0f);
             g.setColour (textPrimary);
-            g.setFont (CustomLookAndFeel::makeFont (24.0f));
+            g.setFont (mf (24.0f, s));
 
             {
-                const int lx = FADER_OUTER - LABEL_EXTRA / 2;
-                const int lw = FADER_W + LABEL_EXTRA;
+                const int lx = m.FADER_OUTER - m.LABEL_EXTRA / 2;
+                const int lw = m.FADER_W + m.LABEL_EXTRA;
                 g.drawText (inputTrimSlider->getTextFromValue (inputTrimSlider->getValue()),
-                            lx, valueY, lw, 24,
+                            lx, valueY, lw, valueH,
                             juce::Justification::centred, false);
             }
             {
-                const int lx = w - FADER_OUTER - FADER_W - LABEL_EXTRA / 2;
-                const int lw = FADER_W + LABEL_EXTRA;
+                const int lx = w - m.FADER_OUTER - m.FADER_W - m.LABEL_EXTRA / 2;
+                const int lw = m.FADER_W + m.LABEL_EXTRA;
                 g.drawText (clipSlider->getTextFromValue (clipSlider->getValue()),
-                            lx, valueY, lw, 24,
+                            lx, valueY, lw, valueH,
                             juce::Justification::centred, false);
             }
         }
@@ -193,11 +234,12 @@ void PapaloteAudioProcessorEditor::HamburgerButton::paint (juce::Graphics& g)
                                            isMouseOver(), isDown());
 
     const auto bounds = getLocalBounds().toFloat();
+    const float sc = static_cast<CustomLookAndFeel&> (getLookAndFeel()).getScale();
     const float cx = bounds.getCentreX();
     const float cy = bounds.getCentreY();
-    const float barW = 18.0f;
-    const float barH = 2.0f;
-    const float gap  = 5.0f;
+    const float barW = 18.0f * sc;
+    const float barH = 2.0f * sc;
+    const float gap  = 5.0f * sc;
 
     g.setColour (isMouseOver() ? PapaloteColors::textPrimary
                                : PapaloteColors::textMid);
@@ -210,8 +252,17 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
       audioProcessor (p),
       presetManager (&p)
 {
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: editor ctor | build ") + __DATE__ + " " + __TIME__
+                                     + " | standalone=" + (isInStandaloneApp (this) ? "yes" : "no"));
     setLookAndFeel (&customLookAndFeel);
     juce::LookAndFeel::setDefaultLookAndFeel (&customLookAndFeel);
+
+    if (auto* scaleParam = audioProcessor.getAPVTS().getParameter (AppConstants::UI_SCALE_ID))
+    {
+        const int idx = juce::roundToInt (scaleParam->getValue() * (AppConstants::ZOOM_PERCENTS.size() - 1));
+        uiScale = AppConstants::ZOOM_PERCENTS [juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f;
+    }
+    customLookAndFeel.setScale (uiScale);
 
     addAndMakeVisible (screenContent);
 
@@ -233,7 +284,9 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
 
     for (auto* s : { &inputTrimSlider, &clipSlider })
     {
-        s->setTextBoxStyle (juce::Slider::NoTextBox, false, 40, 20);
+        s->setTextBoxStyle (juce::Slider::NoTextBox, false,
+                            juce::roundToInt (40.0f * uiScale),
+                            juce::roundToInt (20.0f * uiScale));
         s->setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         s->setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
         screenContent.addAndMakeVisible (s);
@@ -250,14 +303,15 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     auto setupHorizontalSlider = [this] (juce::Slider& s, juce::Label& l, const juce::String& text)
     {
         s.setSliderStyle (juce::Slider::LinearHorizontal);
-        s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 24);
+        s.setTextBoxStyle (juce::Slider::TextBoxRight, false,
+                           juce::roundToInt (60.0f * uiScale),
+                           juce::roundToInt (24.0f * uiScale));
         s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
         screenContent.addAndMakeVisible (s);
 
         l.setText (text.toUpperCase(), juce::dontSendNotification);
         l.setJustificationType (juce::Justification::centredLeft);
-        l.setFont (customLookAndFeel.getCustomFont (22.0f));
         l.setColour (juce::Label::textColourId, PapaloteColors::textPrimary);
         screenContent.addAndMakeVisible (l);
     };
@@ -323,14 +377,19 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     {
         l.setText (text.toUpperCase(), juce::dontSendNotification);
         l.setJustificationType (juce::Justification::centredLeft);
-        l.setFont (customLookAndFeel.getCustomFont (18.0f));
         l.setColour (juce::Label::textColourId, PapaloteColors::textPrimary);
         screenContent.addAndMakeVisible (l);
     };
     setupFooterLabel (tapeTypeLabel, "Material");
     setupFooterLabel (osFactorLabel, "Oversample");
 
-    setSize (W, H);
+    audioProcessor.getAPVTS().addParameterListener (AppConstants::UI_SCALE_ID, this);
+
+    updateZoomLimits();
+    setResizable (true, false);
+
+    applyZoom (uiScale);
+    logZoomDiag ("ctor", uiScale, this);
 }
 
 PapaloteAudioProcessorEditor::~PapaloteAudioProcessorEditor()
@@ -340,11 +399,23 @@ PapaloteAudioProcessorEditor::~PapaloteAudioProcessorEditor()
 
 void PapaloteAudioProcessorEditor::parentHierarchyChanged()
 {
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: parentHierarchyChanged topLevelIsWindow=")
+                                     + (topLevelIsWindow ? "yes" : "no")
+                                     + " hasPeer=" + (getPeer() != nullptr ? "yes" : "no"));
     if (topLevelIsWindow)
         return;
 
+#if JUCE_WINDOWS
+    if (auto* peer = getPeer())
+    {
+        peer->setCustomPlatformScaleFactor (1.0);
+        logZoomDiag ("parentHierarchy", uiScale, this);
+    }
+#endif
+
     if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (getTopLevelComponent()))
     {
+        juce::Logger::outputDebugString ("PAPALOTE: standalone window detected");
         topLevelIsWindow = true;
 
         // SafePointer: the editor or the standalone window may be destroyed
@@ -355,8 +426,11 @@ void PapaloteAudioProcessorEditor::parentHierarchyChanged()
         {
             if (safeSfw == nullptr || safeThis == nullptr)
                 return;
+            juce::Logger::outputDebugString ("PAPALOTE: async resize editor->setSize("
+                + juce::String (juce::roundToInt (W * safeThis->uiScale)) + "x"
+                + juce::String (juce::roundToInt (H * safeThis->uiScale)) + ")");
             safeSfw->setUsingNativeTitleBar (true);
-            safeThis->setSize (W, H);
+            safeThis->setSize ((int) (W * safeThis->uiScale), (int) (H * safeThis->uiScale));
         });
     }
 }
@@ -368,11 +442,78 @@ void PapaloteAudioProcessorEditor::paint (juce::Graphics& g)
 
 void PapaloteAudioProcessorEditor::resized()
 {
-    const int w = getWidth();
-    const int h = getHeight();
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: resized ")
+                                     + juce::String (getWidth()) + "x" + juce::String (getHeight()));
+    layoutControls (getWidth(), getHeight());
+}
 
-    screenContent.setBounds (getLocalBounds());
-    crtOverlay.setBounds (getLocalBounds());
+void PapaloteAudioProcessorEditor::applyZoom (float scale)
+{
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: applyZoom request=") + juce::String (scale)
+                                     + " before editor=" + juce::String (getWidth()) + "x" + juce::String (getHeight()));
+    scale = juce::jlimit (AppConstants::ZOOM_MIN, AppConstants::ZOOM_MAX, scale);
+    uiScale = scale;
+    customLookAndFeel.setScale (uiScale);
+
+    applyScaledFonts();
+
+    updateZoomLimits();
+
+    const auto target = juce::Rectangle<int> (0, 0,
+                                              juce::roundToInt (W * uiScale),
+                                              juce::roundToInt (H * uiScale));
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: applyZoom target=") + juce::String (target.getWidth())
+                                     + "x" + juce::String (target.getHeight()));
+    setSize (target.getWidth(), target.getHeight());
+
+    if (isInStandaloneApp (this))
+        if (auto* tl = getTopLevelComponent())
+        {
+            juce::Logger::outputDebugString (juce::String ("PAPALOTE: applyZoom resizing top-level to ")
+                                             + juce::String (target.getWidth()) + "x" + juce::String (target.getHeight()));
+            tl->setSize (target.getWidth(), target.getHeight());
+        }
+
+    resized();
+    repaint();
+    logZoomDiag ("applyZoom", uiScale, this);
+}
+
+void PapaloteAudioProcessorEditor::updateZoomLimits()
+{
+    setResizeLimits (juce::roundToInt (W * AppConstants::ZOOM_MIN),
+                     juce::roundToInt (H * AppConstants::ZOOM_MIN),
+                     juce::roundToInt (W * AppConstants::ZOOM_MAX),
+                     juce::roundToInt (H * AppConstants::ZOOM_MAX));
+}
+
+void PapaloteAudioProcessorEditor::applyScaledFonts()
+{
+    for (auto* l : { &dirtLabel, &dryWetDirtLabel, &toneLabel })
+        l->setFont (customLookAndFeel.getCustomFont (22.0f));
+    for (auto* l : { &tapeTypeLabel, &osFactorLabel })
+        l->setFont (customLookAndFeel.getCustomFont (18.0f));
+}
+
+void PapaloteAudioProcessorEditor::parameterChanged (const juce::String& parameterID, float /*newValue*/)
+{
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: parameterChanged id=") + parameterID);
+    if (parameterID != AppConstants::UI_SCALE_ID)
+        return;
+
+    auto* scaleParam = audioProcessor.getAPVTS().getParameter (AppConstants::UI_SCALE_ID);
+    if (scaleParam == nullptr)
+        return;
+
+    const int idx = juce::roundToInt (scaleParam->getValue() * (AppConstants::ZOOM_PERCENTS.size() - 1));
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: parameterChanged idx=") + juce::String (idx));
+    applyZoom (AppConstants::ZOOM_PERCENTS [juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f);
+}
+
+void PapaloteAudioProcessorEditor::layoutControls (int w, int h)
+{
+    screenContent.setBounds (0, 0, w, h);
+    crtOverlay.setBounds (0, 0, w, h);
 
     if (crtEnabled)
     {
@@ -388,67 +529,84 @@ void PapaloteAudioProcessorEditor::resized()
         screenContent.setTransform (juce::AffineTransform());
     }
 
+    const float s = (float) w / (float) W;
+    const Metrics m (s);
+
     {
-        const int controlH   = 28;
-        const int controlGap = 9;
-        const int menuW      = 80;
-        const int maxPresetW = 220;
+        const int controlH   = m.sc (28.0f);
+        const int controlGap = m.sc (9.0f);
+        const int menuW      = m.sc (80.0f);
+        const int maxPresetW = m.sc (220.0f);
 
         const int totalControlsW = maxPresetW + controlGap + menuW;
         const int startX = (w - totalControlsW) / 2;
-        const int controlsY = (TOP_BAR_H - controlH) / 2;
+        const int controlsY = (m.TOP_BAR_H - controlH) / 2;
 
         presetDisplay.setBounds (startX, controlsY, maxPresetW, controlH);
         menuButton.setBounds (startX + maxPresetW + controlGap, controlsY, menuW, controlH);
     }
 
-    using CM = CardMetrics;
+    const int footerY    = m.cardBottom + m.sc (26.0f);
+    const int footerRowH = m.FOOTER_H - m.sc (6.0f);
+    const int comboH     = m.sc (34.0f);
+    const int comboY2    = footerY + (footerRowH - comboH) / 2 - m.sc (20.0f);
 
-    const int footerY    = CM::cardBottom + 26;
-    const int footerRowH = FOOTER_H - 6;
-    const int comboH     = 34;
-    const int comboY2    = footerY + (footerRowH - comboH) / 2 - 20;
+    int bx = m.BODY_X + m.CARD_PAD + (m.BODY_W - 2 * m.CARD_PAD - m.totalFooterW) / 2;
 
-    int bx = BODY_X + CARD_PAD + (BODY_W - 2 * CARD_PAD - CM::totalFooterW) / 2;
+    tapeTypeLabel.setBounds (bx, comboY2, m.matLabelW, comboH);
+    bx += m.matLabelW;
+    tapeTypeComboBox.setBounds (bx, comboY2, m.matComboW, comboH);
+    bx += m.matComboW + m.footerGap;
 
-    tapeTypeLabel.setBounds (bx, comboY2, CM::matLabelW, comboH);
-    bx += CM::matLabelW;
-    tapeTypeComboBox.setBounds (bx, comboY2, CM::matComboW, comboH);
-    bx += CM::matComboW + CM::footerGap;
+    osFactorLabel.setBounds (bx, comboY2, m.osLabelW, comboH);
+    bx += m.osLabelW;
+    osFactorComboBox.setBounds (bx, comboY2, m.osComboW, comboH);
+    bx += m.osComboW + m.footerGap;
 
-    osFactorLabel.setBounds (bx, comboY2, CM::osLabelW, comboH);
-    bx += CM::osLabelW;
-    osFactorComboBox.setBounds (bx, comboY2, CM::osComboW, comboH);
-    bx += CM::osComboW + CM::footerGap;
+    bypassButton.setBounds (bx, comboY2 - m.sc (1.0f), m.bypassW, comboH + m.sc (2.0f));
 
-    bypassButton.setBounds (bx, comboY2 - 1, CM::bypassW, comboH + 2);
-
-    const int faderBottom = CM::cardBottom - 5;
-    const int faderY0     = BODY_TOP + CARD_PAD;
+    const int faderBottom = m.cardBottom - m.sc (5.0f);
+    const int faderY0     = m.BODY_TOP + m.CARD_PAD;
     const int faderH      = faderBottom - faderY0;
 
-    inputTrimSlider.setBounds (FADER_OUTER, faderY0, FADER_W, faderH);
-    clipSlider.setBounds (w - FADER_OUTER - FADER_W, faderY0, FADER_W, faderH);
+    inputTrimSlider.setBounds (m.FADER_OUTER, faderY0, m.FADER_W, faderH);
+    clipSlider.setBounds (w - m.FADER_OUTER - m.FADER_W, faderY0, m.FADER_W, faderH);
 
     {
         juce::Slider* sliders[NUM_ROWS] = { &dirtSlider, &dryWetDirtSlider, &toneSlider };
         juce::Label*  labels[NUM_ROWS]  = { &dirtLabel, &dryWetDirtLabel, &toneLabel };
 
-        const int contentAreaH = CM::cardH - CM::titleH;
-        const int rowsTotalH   = NUM_ROWS * (CM::labelH + CM::sliderH)
-                               + (NUM_ROWS - 1) * CM::rowGap;
+        const int contentAreaH = m.cardH - m.titleH;
+        const int rowsTotalH   = NUM_ROWS * (m.labelH + m.sliderH)
+                               + (NUM_ROWS - 1) * m.rowGap;
         const int rowPaddingY  = (contentAreaH - rowsTotalH) / 2;
 
         for (int i = 0; i < NUM_ROWS; ++i)
         {
-            const int rowY = CM::cardY + CM::titleH + rowPaddingY
-                           + i * (CM::labelH + CM::sliderH + CM::rowGap);
-            labels[i]->setBounds (CM::cardX + CM::contentInset / 2, rowY,
-                                  CM::cardW - CM::contentInset, CM::labelH);
-            sliders[i]->setBounds (CM::cardX + CM::contentInset / 2, rowY + CM::labelH,
-                                   CM::cardW - CM::contentInset, CM::sliderH);
+            const int rowY = m.cardY + m.titleH + rowPaddingY
+                           + i * (m.labelH + m.sliderH + m.rowGap);
+            labels[i]->setBounds (m.cardX + m.contentInset / 2, rowY,
+                                  m.cardW - m.contentInset, m.labelH);
+            sliders[i]->setBounds (m.cardX + m.contentInset / 2, rowY + m.labelH,
+                                   m.cardW - m.contentInset, m.sliderH);
         }
     }
+}
+
+int PapaloteAudioProcessorEditor::uiScaleIndex() const
+{
+    int best = AppConstants::UI_SCALE_DEFAULT;
+    float bestDiff = std::numeric_limits<float>::max();
+    for (int i = 0; i < (int) AppConstants::ZOOM_PERCENTS.size(); ++i)
+    {
+        const float diff = std::fabs (AppConstants::ZOOM_PERCENTS[i] / 100.0f - uiScale);
+        if (diff < bestDiff)
+        {
+            bestDiff = diff;
+            best = i;
+        }
+    }
+    return best;
 }
 
 void PapaloteAudioProcessorEditor::buttonClicked (juce::Button* button)
@@ -496,7 +654,8 @@ enum HamburgerMenuOption
     StandaloneSaveState,
     StandaloneLoadState,
     StandaloneReset,
-    About
+    About,
+    ZoomBase = 0x1000
 };
 
 static bool isInStandaloneApp (const juce::Component* c)
@@ -511,6 +670,7 @@ static bool isInStandaloneApp (const juce::Component* c)
 
 void PapaloteAudioProcessorEditor::showHamburgerMenu()
 {
+    juce::Logger::outputDebugString ("PAPALOTE: showHamburgerMenu");
     juce::PopupMenu menu;
 
     menu.addItem (HamburgerMenuOption::Init, "Init");
@@ -523,8 +683,20 @@ void PapaloteAudioProcessorEditor::showHamburgerMenu()
     menu.addSeparator();
     menu.addItem (HamburgerMenuOption::CrtEnabled,
                   juce::String ("CRT Enabled - ") + (crtEnabled ? "[X]" : "[ ]"));
+
     menu.addSeparator();
     menu.addItem (HamburgerMenuOption::About, "About");
+
+    menu.addSeparator();
+    {
+        juce::PopupMenu zoomMenu;
+        const int currentIndex = uiScaleIndex();
+        for (int i = 0; i < (int) AppConstants::ZOOM_PERCENTS.size(); ++i)
+            zoomMenu.addItem (HamburgerMenuOption::ZoomBase + i,
+                              juce::String ((int) AppConstants::ZOOM_PERCENTS[i]) + "%",
+                              true, i == currentIndex);
+        menu.addSubMenu (">> Zoom", zoomMenu);
+    }
 
     if (isInStandaloneApp (this))
     {
@@ -544,6 +716,25 @@ void PapaloteAudioProcessorEditor::showHamburgerMenu()
 
 void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
 {
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: handleMenuResult selectedId=")
+                                     + juce::String (selectedId));
+    if (selectedId >= HamburgerMenuOption::ZoomBase
+        && selectedId < HamburgerMenuOption::ZoomBase + (int) AppConstants::ZOOM_PERCENTS.size())
+    {
+        const int idx = selectedId - HamburgerMenuOption::ZoomBase;
+        juce::Logger::outputDebugString (juce::String ("PAPALOTE: zoom selected idx=") + juce::String (idx)
+                                         + " percent=" + juce::String ((int) AppConstants::ZOOM_PERCENTS[idx]));
+        auto* scaleParam = audioProcessor.getAPVTS().getParameter (AppConstants::UI_SCALE_ID);
+        if (scaleParam != nullptr)
+        {
+            const float norm = (float) idx / (float) (AppConstants::ZOOM_PERCENTS.size() - 1);
+            scaleParam->setValueNotifyingHost (norm);
+        }
+        applyZoom (AppConstants::ZOOM_PERCENTS [juce::jlimit (
+            0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f);
+        return;
+    }
+
     switch (selectedId)
     {
         case HamburgerMenuOption::None:   break;
@@ -583,7 +774,7 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
 #if JucePlugin_Build_Standalone
             if (auto* tl = getTopLevelComponent())
                 if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (tl))
-                    new SettingsWindow (sfw->getPluginHolder()->deviceManager);
+                    new SettingsWindow (sfw->getPluginHolder()->deviceManager, uiScale);
 #endif
             break;
 
@@ -650,7 +841,7 @@ void PapaloteAudioProcessorEditor::displayInitPopup()
 
 void PapaloteAudioProcessorEditor::displaySaveAsPopup()
 {
-    auto* dialog = new SaveAsDialog (presetManager.getCurrentPresetName());
+    auto* dialog = new SaveAsDialog (presetManager.getCurrentPresetName(), uiScale);
     dialog->onConfirm = [this] (const juce::String& name)
     {
         if (name.isNotEmpty())
@@ -659,12 +850,14 @@ void PapaloteAudioProcessorEditor::displaySaveAsPopup()
             updatePresetDisplay();
         }
     };
-    PapaloteDialogs::openWindow (dialog, "Save Preset", this, 460, 220);
+    PapaloteDialogs::openWindow (dialog, "Save Preset", this,
+                                 juce::roundToInt (460.0f * uiScale),
+                                 juce::roundToInt (220.0f * uiScale));
 }
 
 void PapaloteAudioProcessorEditor::displayAboutPopup()
 {
-    new AboutWindow();
+    new AboutWindow (uiScale);
 }
 
 void PapaloteAudioProcessorEditor::updatePresetDisplay()

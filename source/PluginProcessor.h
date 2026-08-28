@@ -13,8 +13,6 @@ namespace AppConstants
     inline constexpr const char *BYPASS_ID = "bypass";
     inline constexpr const char *TONE_ID = "tone";
 
-    // Param ID kept as "clip" for saved-state compatibility; the visible
-    // control is the "Out" gain (dB), applied after all processing.
     inline constexpr const char *CLIP_ID = "clip";
 
     inline constexpr float DB_MIN = -24.0f;
@@ -41,6 +39,13 @@ namespace AppConstants
     inline constexpr int TAPE_TYPE_DEFAULT = 0;
 
     inline constexpr int OS_FACTOR_DEFAULT_INDEX = 0;
+
+    inline constexpr const char *UI_SCALE_ID = "ui_scale";
+    inline constexpr std::array<float, 6> ZOOM_PERCENTS { 75.0f, 100.0f, 125.0f,
+                                                          150.0f, 200.0f, 300.0f };
+    inline constexpr int UI_SCALE_DEFAULT = 1;   // index of 100%
+    inline constexpr float ZOOM_MIN = 0.75f;
+    inline constexpr float ZOOM_MAX = 3.0f;
 }
 
 class PapaloteAudioProcessor : public juce::AudioProcessor,

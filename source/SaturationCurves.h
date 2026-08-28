@@ -14,8 +14,8 @@ namespace papalote
 namespace satcurves
 {
 
-inline constexpr int numTypes = 5;   // Lum, Iri, Rad, Dar, Lus
-inline constexpr int numCoeffs = 8;  // 7th-order polynomial
+inline constexpr int numTypes = 5;
+inline constexpr int numCoeffs = 8;
 inline constexpr int maxDriveLevels = 5;
 
 struct AdaaState

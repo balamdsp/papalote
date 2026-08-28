@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -48,6 +50,7 @@ jobs:
           name: Papalote-windows
           path: |
             build/Papalote_artefacts/Release/VST3/Papalote.vst3
+            build/Papalote_artefacts/Release/CLAP/Papalote.clap
             build/Papalote_artefacts/Release/Standalone/Papalote.exe
       - name: Upload artifacts (macOS)
         if: runner.os == 'macOS'
@@ -56,6 +59,8 @@ jobs:
           name: Papalote-macos
           path: |
             build/Papalote_artefacts/Release/VST3/Papalote.vst3
+            build/Papalote_artefacts/Release/AU/Papalote.component
+            build/Papalote_artefacts/Release/CLAP/Papalote.clap
             build/Papalote_artefacts/Release/Standalone/Papalote.app
       - name: Upload artifacts (Linux)
         if: runner.os == 'Linux'
@@ -64,6 +69,7 @@ jobs:
           name: Papalote-linux
           path: |
             build/Papalote_artefacts/Release/VST3/Papalote.vst3
+            build/Papalote_artefacts/Release/CLAP/Papalote.clap
             build/Papalote_artefacts/Release/Standalone/Papalote
   release:
     name: Release

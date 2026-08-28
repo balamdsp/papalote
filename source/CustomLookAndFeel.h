@@ -54,6 +54,7 @@ class CustomLookAndFeel : public juce::LookAndFeel_V4
 public:
     CustomLookAndFeel()
     {
+        uiScale = 1.0f;
         using namespace PapaloteColors;
 
         vt323 = juce::Typeface::createSystemTypefaceFor(
@@ -122,12 +123,16 @@ public:
         return juce::Font(juce::FontOptions(getTypeface())).withHeight(height);
     }
 
+    void setScale (float s) noexcept { uiScale = s; }
+    float getScale() const noexcept { return uiScale; }
+
     juce::Font getFont(float height, bool /*bold*/ = true) const
     {
+        const float h = height * uiScale;
         if (vt323 != nullptr)
-            return juce::Font(juce::FontOptions(vt323)).withHeight(height);
+            return juce::Font(juce::FontOptions(vt323)).withHeight(h);
         return juce::Font(juce::FontOptions(
-            juce::Font::getDefaultSansSerifFontName(), height, juce::Font::plain));
+            juce::Font::getDefaultSansSerifFontName(), h, juce::Font::plain));
     }
 
     juce::Font getCustomFont(float height, bool bold = true) const
@@ -135,21 +140,15 @@ public:
         return getFont(height, bold);
     }
 
-    juce::Font getLabelFont(juce::Label& label) override
-    {
-        // Respect the per-label font; JUCE-internal labels never set one --
-        // keep the house size so they don't fall back to the stock sans-serif.
-        if (label.getFont().getTypefaceName() == juce::Font::getDefaultSansSerifFontName())
-            return getFont(22.0f);
-        return label.getFont();
-    }
+    float uiScale = 1.0f;
+
     juce::Font getComboBoxFont(juce::ComboBox&) override { return getFont(18.0f); }
     juce::Font getTextButtonFont(juce::TextButton&, int) override { return getFont(18.0f); }
     juce::Font getPopupMenuFont() override { return getCustomFont(18.0f); }
-    int getPopupMenuBorderSize() override { return 3; }
+    int getPopupMenuBorderSize() override { return juce::roundToInt (3.0f * uiScale); }
     juce::Font getAlertWindowTitleFont() override { return getCustomFont(36.0f); }
     juce::Font getAlertWindowMessageFont() override { return getCustomFont(26.0f); }
-    int getAlertWindowButtonHeight() override { return 34; }
+    int getAlertWindowButtonHeight() override { return juce::roundToInt (34.0f * uiScale); }
 
     void getIdealPopupMenuItemSize (const juce::String& text, bool isSeparator,
                                     int standardMenuItemHeight,
@@ -158,7 +157,8 @@ public:
         LookAndFeel_V4::getIdealPopupMenuItemSize (text, isSeparator,
                                                    standardMenuItemHeight,
                                                    idealWidth, idealHeight);
-        idealWidth = juce::jmax (idealWidth, 220);
+        idealWidth = juce::jmax (idealWidth, roundToInt (220.0f * uiScale));
+        idealHeight = roundToInt ((float) idealHeight * uiScale);
     }
 
     juce::Slider::SliderLayout getSliderLayout(juce::Slider& slider) override
@@ -176,13 +176,13 @@ public:
         }
         else if (slider.isHorizontal())
         {
-            layout.textBoxBounds = bounds.removeFromRight(64).translated(0, -1);
-            layout.sliderBounds = bounds.reduced(4, 0);
+            layout.textBoxBounds = bounds.removeFromRight (juce::roundToInt (64.0f * uiScale)).translated (0, -1);
+            layout.sliderBounds = bounds.reduced (juce::roundToInt (4.0f * uiScale), 0);
         }
         else
         {
             layout.textBoxBounds = {};
-            layout.sliderBounds = bounds.reduced(0, 8).translated(0, 8);
+            layout.sliderBounds = bounds.reduced (0, juce::roundToInt (8.0f * uiScale)).translated (0, juce::roundToInt (8.0f * uiScale));
         }
         return layout;
     }
@@ -241,7 +241,7 @@ public:
 
         if (style == juce::Slider::LinearHorizontal)
         {
-            const float th = 12.0f;
+            const float th = 12.0f * uiScale;
             juce::Rectangle<float> track{
                 (float)x, (float)y + (float)height * 0.5f - th * 0.5f,
                 (float)width, th};
@@ -258,7 +258,7 @@ public:
             return;
         }
 
-        const float tw = 12.0f;
+        const float tw = 12.0f * uiScale;
 
         juce::Rectangle<float> track{
             (float)x + (float)width * 0.5f - tw * 0.5f,
@@ -375,7 +375,7 @@ public:
         const juce::String text = isOn ? ("> " + button.getButtonText() + " <")
                                        : ("[ " + button.getButtonText() + " ]");
 
-        g.drawText(text, button.getLocalBounds().translated(0, -2),
+        g.drawText(text, button.getLocalBounds().translated(0, 0),
                    juce::Justification::centred, true);
     }
 
@@ -496,7 +496,7 @@ public:
         void lookAndFeelChanged() override
         {
             juce::Label::lookAndFeelChanged();
-            setFont(CustomLookAndFeel::makeFont(22.0f));
+            setFont (static_cast<CustomLookAndFeel&> (getLookAndFeel()).getFont (22.0f));
         }
 
         void editorShown(juce::TextEditor* te) override
@@ -518,7 +518,7 @@ public:
         auto* l = new PapaloteSliderTextLabel();
         l->setJustificationType(juce::Justification::centred);
         l->setKeyboardType(juce::TextInputTarget::decimalKeyboard);
-        l->setFont(CustomLookAndFeel::makeFont(22.0f));
+        l->setFont(getFont(22.0f));
 
         l->setColour(juce::Label::textColourId, slider.findColour(juce::Slider::textBoxTextColourId));
         l->setColour(juce::Label::backgroundColourId, slider.findColour(juce::Slider::textBoxBackgroundColourId));
@@ -528,6 +528,15 @@ public:
         l->setColour(juce::TextEditor::outlineColourId, slider.findColour(juce::Slider::textBoxOutlineColourId));
         l->setColour(juce::TextEditor::highlightColourId, slider.findColour(juce::Slider::textBoxHighlightColourId));
         return l;
+    }
+
+    juce::Font getLabelFont(juce::Label& label) override
+    {
+        if (dynamic_cast<PapaloteSliderTextLabel*> (&label) != nullptr)
+            return getFont (22.0f);
+        if (label.getFont().getTypefaceName() == juce::Font::getDefaultSansSerifFontName())
+            return getFont (22.0f);
+        return label.getFont();
     }
 
     class PapaloteDocumentWindowButton final : public juce::Button
@@ -603,7 +612,7 @@ public:
 
         g.fillAll (PapaloteColors::background);
 
-        juce::Font font = getFont ((float) h * 0.65f);
+        juce::Font font = makeFont ((float) h * 0.65f);
         g.setFont (font);
 
         auto textW = juce::GlyphArrangement::getStringWidthInt (font, window.getName());

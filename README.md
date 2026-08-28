@@ -1,9 +1,9 @@
 # Papalote — Dirt Saturator Plugin
 
-A VST3 / Standalone audio saturation plugin by **BalamDSP**. Two-stage
-anti-aliased polynomial saturation.
+A VST3 / AU / CLAP / Standalone audio saturation plugin by **BalamDSP**.
+Two-stage anti-aliased polynomial saturation.
 
-Formats: **VST3** + **Standalone** (JUCE 9, CMake).
+Formats: **VST3**, **AU** (macOS), **CLAP** + **Standalone** (JUCE 9, CMake).
 
 <p align="center">
   <img src="images/screen.png" alt="Papalote Screenshot">
@@ -34,14 +34,18 @@ Formats: **VST3** + **Standalone** (JUCE 9, CMake).
 
 ## Building
 
-Requirements: CMake ≥ 3.22, a C++17 compiler (MSVC tested), and JUCE 9. By
-default the build uses a local JUCE checkout (`PAPALOTE_JUCE_PATH` cache
-entry in `CMakeLists.txt`); when that path does not exist, JUCE 9.0.1 is
-fetched automatically — which is how CI builds it.
+Requirements: CMake ≥ 3.22 and a C++17 compiler. JUCE 9.0.1 is fetched
+automatically via CMake's FetchContent, and the CLAP wrapper
+(`clap-juce-extensions`) is included as a git submodule.
 
-1. Point the build at your JUCE 9 checkout (edit the `PAPALOTE_JUCE_PATH`
-   default or pass `-DPAPALOTE_JUCE_PATH=<path>`), or skip this step to
-   fetch JUCE automatically.
+1. Check out the repository with submodules:
+
+   ```sh
+   git clone --recurse-submodules <url>
+   # or, if already cloned:
+   git submodule update --init --recursive
+   ```
+
 2. Configure and build:
 
    ```sh
@@ -50,9 +54,13 @@ fetched automatically — which is how CI builds it.
    ```
 
 3. Artifacts land in `build/Papalote_artefacts/Release/`:
-   `VST3/Papalote.vst3` (also copied to the system VST3 folder when
-   `PAPALOTE_COPY_AFTER_BUILD` is ON, the default) and
-   `Standalone/Papalote.exe`.
+   - `VST3/Papalote.vst3`
+   - `AU/Papalote.component` (macOS only)
+   - `CLAP/Papalote.clap`
+   - `Standalone/Papalote` (`.exe` on Windows, `.app` on macOS)
+
+   When `PAPALOTE_COPY_AFTER_BUILD` is ON (the default) plugins are also
+   copied into the platform's default system plugin folders.
 
 A standalone ADAA integrity test suite lives in `tests/`.
 
@@ -61,6 +69,7 @@ A standalone ADAA integrity test suite lives in `tests/`.
 | Component | Author | License |
 |---|---|---|
 | JUCE framework | JUCE Ltd | AGPLv3 |
+| clap-juce-extensions (CLAP wrapper) | [free-audio](https://github.com/free-audio/clap-juce-extensions) | MIT |
 | JClones Phoenix (saturation curves) | [JClones](https://github.com/JClones/JSFXClones) | MIT |
 | cool-retro-term (CRT effect) | Filippo Scognamiglio (Swordfish90) | GPL |
 | VT323 typeface | Peter Hull | OFL |

@@ -11,9 +11,6 @@ namespace satcurves
 namespace
 {
 
-// ── Waveshaper coefficient tables (from research/waveshaper_data.txt) ──────
-
-// Luminescent — 5 drive levels (0 %, 25 %, 50 %, 75 %, 100 %)
 constexpr std::array<std::array<float, numCoeffs>, 5> LumTable = {{
     { 0.000000f, 1.000035f, -0.000000f, -0.000000f, 0.000000f, -0.000000f, -0.000000f, 0.000000f },
     { 0.000000f, 1.139243f, 0.000017f, -0.144589f, -0.000006f, 0.029211f, 0.000000f, 0.001178f },
@@ -22,7 +19,6 @@ constexpr std::array<std::array<float, numCoeffs>, 5> LumTable = {{
     { 0.000000f, 1.645529f, 0.000098f, -0.959458f, -0.000092f, 0.500261f, 0.000030f, -0.109095f }
 }};
 
-// Iridescent — 4 drive levels (25 %, 50 %, 75 %, 100 %)
 constexpr std::array<std::array<float, numCoeffs>, 4> IriTable = {{
     { -0.000000f, 1.127533f, 0.000014f, -0.111741f, -0.000005f, 0.018535f, 0.000000f, 0.000981f },
     { -0.000000f, 1.268255f, 0.000033f, -0.268812f, -0.000017f, 0.072853f, 0.000003f, -0.005936f },
@@ -30,7 +26,6 @@ constexpr std::array<std::array<float, numCoeffs>, 4> IriTable = {{
     { -0.000000f, 1.591453f, 0.000084f, -0.742114f, -0.000068f, 0.324487f, 0.000020f, -0.058677f }
 }};
 
-// Radiant — 4 drive levels (25 %, 50 %, 75 %, 100 %)
 constexpr std::array<std::array<float, numCoeffs>, 4> RadTable = {{
     { -0.000001f, 1.150743f, 0.000019f, -0.045944f, 0.000016f, -0.428443f, -0.000029f, 0.324271f },
     { -0.000002f, 1.313470f, 0.000050f, -0.169135f, -0.000002f, -0.753648f, -0.000035f, 0.610960f },
@@ -38,7 +33,6 @@ constexpr std::array<std::array<float, numCoeffs>, 4> RadTable = {{
     { -0.000006f, 1.679314f, 0.000145f, -0.681950f, -0.000136f, -1.021807f, 0.000020f, 1.029260f }
 }};
 
-// Dark Essence — 4 drive levels (25 %, 50 %, 75 %, 100 %)
 constexpr std::array<std::array<float, numCoeffs>, 4> DarTable = {{
     { -0.000004f, 1.235713f, 0.000126f, -0.243462f, -0.000436f, -0.339512f, 0.000436f, 0.349528f },
     { 0.000005f, 1.547768f, -0.000067f, -1.058449f, 0.000355f, 0.229530f, -0.000241f, 0.286550f },
@@ -46,7 +40,6 @@ constexpr std::array<std::array<float, numCoeffs>, 4> DarTable = {{
     { 0.000081f, 2.382488f, -0.002208f, -4.672112f, 0.008542f, 5.084883f, -0.006535f, -1.792806f }
 }};
 
-// Luster — 4 drive levels (25 %, 50 %, 75 %, 100 %)
 constexpr std::array<std::array<float, numCoeffs>, 4> LusTable = {{
     { -0.000002f, 1.266302f, 0.000044f, -0.087298f, 0.000008f, -0.824493f, -0.000040f, 0.634762f },
     { -0.000008f, 1.637986f, 0.000196f, -0.890570f, -0.000299f, -0.661759f, 0.000136f, 0.898743f },

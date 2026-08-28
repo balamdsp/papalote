@@ -15,7 +15,7 @@
 //  9. process() finite on 200-pt sweep:  deterministic grid [-2, +2]
 // =============================================================================
 
-#include "../source/SaturationCurves.cpp"
+#include "../Source/SaturationCurves.cpp"
 
 #include <cstdio>
 #include <cmath>

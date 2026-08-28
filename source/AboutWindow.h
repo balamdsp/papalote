@@ -32,18 +32,21 @@ public:
                         const juce::String& message,
                         const juce::String& confirmText,
                         const juce::String& cancelText = {},
-                        const juce::File& pathToShow = {})
+                        const juce::File& pathToShow = {},
+                        float scale = 1.0f)
     {
+        uiScale = scale;
+        papaloteDialogLnf().setScale (uiScale);
         setLookAndFeel (&papaloteDialogLnf());
 
         titleLabel.setText (title, juce::dontSendNotification);
-        titleLabel.setFont (CustomLookAndFeel::makeFont (19.0f));
+        titleLabel.setFont (CustomLookAndFeel::makeFont (19.0f * uiScale));
         titleLabel.setColour (juce::Label::textColourId,
                               PapaloteColors::textPrimary.withAlpha (0.50f));
         addAndMakeVisible (titleLabel);
 
         messageLabel.setText (message, juce::dontSendNotification);
-        messageLabel.setFont (CustomLookAndFeel::makeFont (22.0f));
+        messageLabel.setFont (CustomLookAndFeel::makeFont (22.0f * uiScale));
         messageLabel.setColour (juce::Label::textColourId,
                                 PapaloteColors::textPrimary);
         messageLabel.setJustificationType (juce::Justification::centredLeft);
@@ -54,7 +57,7 @@ public:
             pathEditor.setReadOnly (true);
             pathEditor.setMultiLine (false, false);
             pathEditor.setReturnKeyStartsNewLine (false);
-            pathEditor.setFont (CustomLookAndFeel::makeFont (20.0f));
+            pathEditor.setFont (CustomLookAndFeel::makeFont (20.0f * uiScale));
             pathEditor.setText (pathToShow.getFullPathName());
             addAndMakeVisible (pathEditor);
         }
@@ -90,26 +93,26 @@ public:
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced (25);
+        auto area = getLocalBounds().reduced (juce::roundToInt (25.0f * uiScale));
 
-        titleLabel.setBounds (area.removeFromTop (21));
-        area.removeFromTop (5);
+        titleLabel.setBounds (area.removeFromTop (juce::roundToInt (21.0f * uiScale)));
+        area.removeFromTop (juce::roundToInt (5.0f * uiScale));
 
-        constexpr int rowGap = 10;
-        auto buttonsRow = area.removeFromBottom (30);
+        const int rowGap = juce::roundToInt (10.0f * uiScale);
+        auto buttonsRow = area.removeFromBottom (juce::roundToInt (30.0f * uiScale));
         area.removeFromBottom (rowGap);
 
-        const int cancelW = cancelButton.isVisible() ? 150 : 0;
+        const int cancelW = cancelButton.isVisible() ? juce::roundToInt (150.0f * uiScale) : 0;
         if (cancelButton.isVisible())
         {
             cancelButton.setBounds (buttonsRow.removeFromRight (cancelW));
             buttonsRow.removeFromRight (rowGap);
         }
-        confirmButton.setBounds (buttonsRow.removeFromRight (190));
+        confirmButton.setBounds (buttonsRow.removeFromRight (juce::roundToInt (190.0f * uiScale)));
 
         if (pathEditor.isVisible())
         {
-            pathEditor.setBounds (area.removeFromBottom (32));
+            pathEditor.setBounds (area.removeFromBottom (juce::roundToInt (32.0f * uiScale)));
             area.removeFromBottom (rowGap);
         }
 
@@ -125,6 +128,8 @@ private:
 
     static constexpr int kTitleInsetPx = 5;
     static constexpr int kTitleHeightPx = 16;
+
+    float uiScale = 1.0f;
 
     juce::Label titleLabel;
     juce::Label messageLabel;
@@ -178,11 +183,13 @@ namespace PapaloteDialogs
 class AboutWindow : public juce::DocumentWindow
 {
 public:
-    AboutWindow()
+    AboutWindow (float scale = 1.0f)
         : juce::DocumentWindow ("About Papalote",
                                 juce::Colour (0xff0c0c0c),
                                 allButtons)
     {
+        papaloteDialogLnf().setScale (scale);
+
         const juce::String message =
             "Version " + juce::String (ProjectInfo::versionString)
             + "\n\nA dirt saturator plugin"
@@ -194,11 +201,12 @@ public:
             + "\n  VT323 typeface    -- Peter Hull (OFL)";
 
         setContentOwned (
-            new PapaloteCardDialog (">> ABOUT PAPALOTE", message, "CLOSE"),
+            new PapaloteCardDialog (">> ABOUT PAPALOTE", message, "CLOSE", {}, {}, scale),
             true);
         setResizable (false, false);
 
-        centreWithSize (460, 380);
+        centreWithSize (juce::roundToInt (460.0f * scale),
+                        juce::roundToInt (380.0f * scale));
         setVisible (true);
     }
 

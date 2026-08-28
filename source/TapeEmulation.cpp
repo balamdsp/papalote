@@ -85,13 +85,13 @@ void TapeEmulation::updateToneFilter(float tone)
 
     if (tone <= 0.5f)
     {
-        const float t = tone / 0.5f;            // 0 → 1  (Opal → Gold)
+        const float t = tone / 0.5f;            // 0 → 1  
         loGain = 1.0 * (1.0 - t) + 0.0 * t;    // +1.0 → 0
         hiGain = -2.5 * (1.0 - t) + 0.0 * t;   // -2.5 → 0
     }
     else
     {
-        const float t = (tone - 0.5f) / 0.5f;   // 0 → 1  (Gold → Sapphire)
+        const float t = (tone - 0.5f) / 0.5f;   // 0 → 1  
         loGain = 0.0 * (1.0 - t) + (-0.5) * t;  // 0 → -0.5
         hiGain = 0.0 * (1.0 - t) + 2.5 * t;     // 0 → +2.5
     }
@@ -137,7 +137,6 @@ void TapeEmulation::processAudio(float *input, float *output,
         low_pass_filter_state += (sat2 - low_pass_filter_state)
                                * low_pass_filter_coefficient;
 
-        // Apply tone EQ (post-saturation, pre-mix)
         double toneOut = toneShelfLo.process((double) low_pass_filter_state);
         toneOut = toneShelfHi.process(toneOut);
 

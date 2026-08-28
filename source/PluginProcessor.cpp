@@ -16,6 +16,7 @@ PapaloteAudioProcessor::PapaloteAudioProcessor()
 {
     apvts.addParameterListener(AppConstants::OS_FACTOR_ID, this);
     apvts.addParameterListener(AppConstants::TAPE_TYPE_ID, this);
+    juce::Logger::outputDebugString (juce::String ("PAPALOTE: processor ctor | build ") + __DATE__ + " " + __TIME__);
 }
 
 PapaloteAudioProcessor::~PapaloteAudioProcessor() {}
@@ -58,6 +59,14 @@ PapaloteAudioProcessor::createParameterLayout()
         AppConstants::OS_FACTOR_ID, "Oversampling",
         juce::StringArray { "x1", "2x", "4x", "8x", "16x" },
         AppConstants::OS_FACTOR_DEFAULT_INDEX));
+
+    juce::StringArray scaleChoices;
+    for (const auto p : AppConstants::ZOOM_PERCENTS)
+        scaleChoices.add (juce::String (p, 0) + "%");
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        AppConstants::UI_SCALE_ID, "UI Scale", scaleChoices,
+        AppConstants::UI_SCALE_DEFAULT));
 
     return { params.begin(), params.end() };
 }
@@ -224,6 +233,7 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 bool PapaloteAudioProcessor::hasEditor() const { return true; }
 juce::AudioProcessorEditor* PapaloteAudioProcessor::createEditor()
 {
+    juce::Logger::outputDebugString ("PAPALOTE: createEditor called");
     return new PapaloteAudioProcessorEditor(*this);
 }
 

@@ -10,24 +10,26 @@
 class SaveAsDialog : public juce::Component
 {
 public:
-    SaveAsDialog (const juce::String& initialName)
+    SaveAsDialog (const juce::String& initialName, float scale = 1.0f)
     {
+        uiScale = scale;
+        papaloteDialogLnf().setScale (uiScale);
         setLookAndFeel (&papaloteDialogLnf());
 
         titleLabel.setText (">> SAVE PRESET", juce::dontSendNotification);
-        titleLabel.setFont (CustomLookAndFeel::makeFont (19.0f));
+        titleLabel.setFont (CustomLookAndFeel::makeFont (19.0f * uiScale));
         titleLabel.setColour (juce::Label::textColourId,
                               PapaloteColors::textPrimary.withAlpha (0.50f));
         addAndMakeVisible (titleLabel);
 
         messageLabel.setText ("Enter a name for your preset:",
                              juce::dontSendNotification);
-        messageLabel.setFont (CustomLookAndFeel::makeFont (22.0f));
+        messageLabel.setFont (CustomLookAndFeel::makeFont (22.0f * uiScale));
         messageLabel.setColour (juce::Label::textColourId,
                                 PapaloteColors::textPrimary);
         addAndMakeVisible (messageLabel);
 
-        nameEditor.setFont (CustomLookAndFeel::makeFont (22.0f));
+        nameEditor.setFont (CustomLookAndFeel::makeFont (22.0f * uiScale));
         nameEditor.setText (initialName);
         nameEditor.setSelectAllWhenFocused (true);
         nameEditor.setColour (juce::TextEditor::backgroundColourId, PapaloteColors::buttonOff);
@@ -60,19 +62,19 @@ public:
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced (25);
+        auto area = getLocalBounds().reduced (juce::roundToInt (25.0f * uiScale));
 
-        titleLabel.setBounds (area.removeFromTop (21));
-        area.removeFromTop (5);
-        messageLabel.setBounds (area.removeFromTop (26));
-        area.removeFromTop (8);
-        nameEditor.setBounds (area.removeFromTop (36));
-        area.removeFromTop (12);
+        titleLabel.setBounds (area.removeFromTop (juce::roundToInt (21.0f * uiScale)));
+        area.removeFromTop (juce::roundToInt (5.0f * uiScale));
+        messageLabel.setBounds (area.removeFromTop (juce::roundToInt (26.0f * uiScale)));
+        area.removeFromTop (juce::roundToInt (8.0f * uiScale));
+        nameEditor.setBounds (area.removeFromTop (juce::roundToInt (36.0f * uiScale)));
+        area.removeFromTop (juce::roundToInt (12.0f * uiScale));
 
-        auto buttonsRow = area.removeFromBottom (30);
-        cancelButton.setBounds (buttonsRow.removeFromRight (150));
-        buttonsRow.removeFromRight (10);
-        confirmButton.setBounds (buttonsRow.removeFromRight (190));
+        auto buttonsRow = area.removeFromBottom (juce::roundToInt (30.0f * uiScale));
+        cancelButton.setBounds (buttonsRow.removeFromRight (juce::roundToInt (150.0f * uiScale)));
+        buttonsRow.removeFromRight (juce::roundToInt (10.0f * uiScale));
+        confirmButton.setBounds (buttonsRow.removeFromRight (juce::roundToInt (190.0f * uiScale)));
     }
 
     void visibilityChanged() override
@@ -88,6 +90,8 @@ private:
             dw->closeButtonPressed();
     }
 
+    float uiScale = 1.0f;
+
     juce::Label titleLabel, messageLabel;
     juce::TextEditor nameEditor;
     juce::TextButton confirmButton, cancelButton;
@@ -96,7 +100,8 @@ private:
 };
 
 class PapaloteAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                     public juce::Button::Listener
+                                     public juce::Button::Listener,
+                                     public juce::AudioProcessorValueTreeState::Listener
 {
 public:
     PapaloteAudioProcessorEditor (PapaloteAudioProcessor&);
@@ -106,10 +111,19 @@ public:
     void resized () override;
     void buttonClicked (juce::Button* button) override;
     void parentHierarchyChanged() override;
+    void parameterChanged (const juce::String &parameterID, float newValue) override;
 
 private:
+    void applyZoom (float scale);
+    void updateZoomLimits();
+    void applyScaledFonts();
+    void layoutControls (int w, int h);
+    int uiScaleIndex() const;
+
     CustomLookAndFeel customLookAndFeel;
     PresetManager presetManager;
+
+    float uiScale = 1.0f;
 
     struct ScreenContent : public juce::Component, private juce::Timer
     {
