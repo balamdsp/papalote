@@ -29,8 +29,6 @@ int numDriveLevels(int type) noexcept;
 
 const std::array<float, numCoeffs>& driveCoeffs(int type, int level) noexcept;
 
-double naive(int type, double x, float driveNorm) noexcept;
-
 float process(int type, double x, AdaaState& s, float driveNorm) noexcept;
 
 }

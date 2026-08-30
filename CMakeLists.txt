@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Papalote VERSION 0.8.0)
+project(Papalote VERSION 0.8.1)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -87,3 +87,4 @@ target_link_libraries(Papalote
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
 )
+

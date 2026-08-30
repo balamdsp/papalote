@@ -71,11 +71,12 @@ void TapeEmulation::computeHighShelf(Biquad& bq, double fc, double gainDb,
 
 // ── Tone filter update ─────────────────────────────────────────────────────
 
-void TapeEmulation::updateToneFilter(float tone)
+void TapeEmulation::updateToneFilter(float tone, double fs)
 {
-    if (tone == lastTone || sampleRate <= 0.0)
+    if ((tone == lastTone && fs == lastSampleRate) || fs <= 0.0)
         return;
     lastTone = tone;
+    lastSampleRate = fs;
 
     constexpr double loFc = 200.0;
     constexpr double hiFc = 3000.0;
@@ -96,30 +97,51 @@ void TapeEmulation::updateToneFilter(float tone)
         hiGain = 0.0 * (1.0 - t) + 2.5 * t;     // 0 → +2.5
     }
 
-    computeLowShelf(toneShelfLo, loFc, loGain, shelfQ, sampleRate);
-    computeHighShelf(toneShelfHi, hiFc, hiGain, shelfQ, sampleRate);
+    computeLowShelf(toneShelfLo, loFc, loGain, shelfQ, fs);
+    computeHighShelf(toneShelfHi, hiFc, hiGain, shelfQ, fs);
 }
 
 // ── Process ────────────────────────────────────────────────────────────────
+
+void TapeEmulation::updateProcessingRate(double processSampleRate)
+{
+    if (processSampleRate == lastProcessSampleRate || sampleRate <= 0.0)
+        return;
+
+    lastProcessSampleRate = processSampleRate;
+
+    effective_high_pass_filter_coefficient = high_pass_filter_coefficient;
+
+    const double rateRatio = sampleRate / processSampleRate;
+    effective_low_pass_filter_coefficient =
+        (float) (1.0 - std::pow(1.0 - (double) low_pass_filter_coefficient, rateRatio));
+
+    diffCompensation = (float) (1.0 / rateRatio);
+}
 
 void TapeEmulation::processAudio(float *input, float *output,
                                  float input_trim,
                                  float process_amount,
                                  int tape_type, float wet_dry_mix,
-                                 float tone, int numSamples)
+                                 float tone, int numSamples,
+                                 double processSampleRate)
 {
     juce::ignoreUnused(tape_type);
 
     const float p_dec = process_amount / PROCESS_AMOUNT_MAX;
 
-    updateToneFilter(tone);
+    updateProcessingRate(processSampleRate);
+    updateToneFilter(tone, processSampleRate);
+
+    const float hpEff = effective_high_pass_filter_coefficient;
+    const float lpEff = effective_low_pass_filter_coefficient;
 
     for (int i = 0; i < numSamples; ++i)
     {
         const float dry_sample = input[i] * input_trim;
 
-        const float hp = high_pass_filter_coefficient * dry_sample
-                       + (dry_sample - previous_sample);
+        const float hp = hpEff * dry_sample
+                       + diffCompensation * (dry_sample - previous_sample);
         previous_sample = dry_sample;
 
         const float filtered = hp * filter_coefficient_1 + hp;
@@ -127,15 +149,13 @@ void TapeEmulation::processAudio(float *input, float *output,
         const float pre_sat = (pre_saturation_bypass == 0) ? dry_sample : filtered;
 
         const float sig1 = filtered;
-        const float sat1 = papalote::satcurves::process(
-            saturation_type, sig1, adaaStage1, p_dec);
+        const float sat1 = papalote::satcurves::process(saturation_type, sig1, adaaStage1, p_dec);
 
         const float sig2 = sat1 * saturation_blend_1 + pre_sat;
-        const float sat2 = papalote::satcurves::process(
-            saturation_type, sig2, adaaStage2, p_dec);
+        const float sat2 = papalote::satcurves::process(saturation_type, sig2, adaaStage2, p_dec);
 
         low_pass_filter_state += (sat2 - low_pass_filter_state)
-                               * low_pass_filter_coefficient;
+                               * lpEff;
 
         double toneOut = toneShelfLo.process((double) low_pass_filter_state);
         toneOut = toneShelfHi.process(toneOut);
@@ -164,6 +184,8 @@ void TapeEmulation::setMode(int type)
     saturation_blend_2 = p.saturation_blend_2;
     pre_saturation_bypass = p.pre_saturation_bypass;
     saturation_type = p.saturation_type;
+
+    lastProcessSampleRate = -1.0;
 }
 
 void TapeEmulation::resetPreviousState()
@@ -177,4 +199,9 @@ void TapeEmulation::resetPreviousState()
     toneShelfLo.reset();
     toneShelfHi.reset();
     lastTone = -1.0f;
+    lastSampleRate = -1.0;
+    lastProcessSampleRate = -1.0;
+    effective_high_pass_filter_coefficient = 0.0f;
+    effective_low_pass_filter_coefficient = 0.0f;
+    diffCompensation = 1.0f;
 }

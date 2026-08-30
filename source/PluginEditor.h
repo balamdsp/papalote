@@ -160,6 +160,17 @@ private:
 
     juce::Slider inputTrimSlider, clipSlider;
 
+    class FaderValueLabel final : public juce::Label
+    {
+    public:
+        FaderValueLabel() : juce::Label ({}, {}) {}
+        void editorShown (juce::TextEditor* te) override
+        {
+            te->setJustification (juce::Justification::centred);
+        }
+    };
+    FaderValueLabel inputTrimValueLabel, clipValueLabel;
+
     juce::Slider dirtSlider, dryWetDirtSlider, toneSlider;
     juce::Label  dirtLabel, dryWetDirtLabel, toneLabel;
 

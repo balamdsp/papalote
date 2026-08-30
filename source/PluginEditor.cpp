@@ -202,29 +202,6 @@ void PapaloteAudioProcessorEditor::ScreenContent::paint (juce::Graphics& g)
 
         drawFaderHeader (m.FADER_OUTER, "IN");
         drawFaderHeader (w - m.FADER_OUTER - m.FADER_W, "OUT");
-
-        if (inputTrimSlider != nullptr && clipSlider != nullptr)
-        {
-            const int valueY = faderY0 + faderH + m.sc (13.0f);
-            const int valueH = m.sc (24.0f);
-            g.setColour (textPrimary);
-            g.setFont (mf (24.0f, s));
-
-            {
-                const int lx = m.FADER_OUTER - m.LABEL_EXTRA / 2;
-                const int lw = m.FADER_W + m.LABEL_EXTRA;
-                g.drawText (inputTrimSlider->getTextFromValue (inputTrimSlider->getValue()),
-                            lx, valueY, lw, valueH,
-                            juce::Justification::centred, false);
-            }
-            {
-                const int lx = w - m.FADER_OUTER - m.FADER_W - m.LABEL_EXTRA / 2;
-                const int lw = m.FADER_W + m.LABEL_EXTRA;
-                g.drawText (clipSlider->getTextFromValue (clipSlider->getValue()),
-                            lx, valueY, lw, valueH,
-                            juce::Justification::centred, false);
-            }
-        }
     }
 }
 
@@ -297,6 +274,42 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     clipAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.getAPVTS(), AppConstants::CLIP_ID, clipSlider);
 
+    auto setupValueLabel = [this] (juce::Label& l, juce::Slider& s)
+    {
+        l.setJustificationType (juce::Justification::centred);
+        l.setColour (juce::Label::textColourId, PapaloteColors::textPrimary);
+        l.setColour (juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+        l.setColour (juce::Label::outlineColourId, juce::Colours::transparentBlack);
+        l.setColour (juce::TextEditor::textColourId, PapaloteColors::textPrimary);
+        l.setColour (juce::TextEditor::backgroundColourId, PapaloteColors::background.withAlpha (0.6f));
+        l.setColour (juce::TextEditor::outlineColourId, PapaloteColors::accentDim.withAlpha (0.35f));
+        l.setColour (juce::TextEditor::highlightColourId, PapaloteColors::accentDim);
+        l.setEditable (true, true, false);
+        screenContent.addAndMakeVisible (l);
+
+        const auto snapshotText = [this, &l, &s] ()
+        {
+            l.setText (s.getTextFromValue (s.getValue()), juce::dontSendNotification);
+        };
+        l.onTextChange = [this, &l, &s, &snapshotText] ()
+        {
+            const auto text = l.getText();
+            if (text.trim().isEmpty())
+            {
+                snapshotText();
+                return;
+            }
+            const double v = s.snapValue (s.getValueFromText (text), juce::Slider::notDragging);
+            if (! juce::approximatelyEqual (v, s.getValue()))
+                s.setValue (v, juce::sendNotificationSync);
+            l.setText (s.getTextFromValue (s.getValue()), juce::dontSendNotification);
+        };
+        s.onValueChange = snapshotText;
+        snapshotText();
+    };
+    setupValueLabel (inputTrimValueLabel, inputTrimSlider);
+    setupValueLabel (clipValueLabel, clipSlider);
+
     screenContent.inputTrimSlider = &inputTrimSlider;
     screenContent.clipSlider = &clipSlider;
 
@@ -328,19 +341,38 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     toneAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.getAPVTS(), AppConstants::TONE_ID, toneSlider);
 
+    dirtSlider.setNormalisableRange ({ (double) AppConstants::DRIVE_MIN,
+                                       (double) AppConstants::DRIVE_MAX, 0.01 });
+    dryWetDirtSlider.setNormalisableRange ({ (double) AppConstants::DRY_WET_MIN,
+                                             (double) AppConstants::DRY_WET_MAX, 0.01 });
+    toneSlider.setNormalisableRange ({ (double) AppConstants::TONE_MIN,
+                                       (double) AppConstants::TONE_MAX, 0.01 });
+
     dirtSlider.textFromValueFunction = [] (double value)
     {
-        return juce::String (static_cast<int> (value)) + "%";
+        return juce::String (juce::roundToInt (value)) + "%";
+    };
+    dirtSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        return text.getDoubleValue();
     };
 
     dryWetDirtSlider.textFromValueFunction = [] (double value)
     {
-        return juce::String (static_cast<int> (value * 100.0)) + "%";
+        return juce::String (juce::roundToInt (value * 100.0)) + "%";
+    };
+    dryWetDirtSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        return text.getDoubleValue() / 100.0;
     };
 
     toneSlider.textFromValueFunction = [] (double value)
     {
-        return juce::String (static_cast<int> (value * 100.0)) + "%";
+        return juce::String (juce::roundToInt (value * 100.0)) + "%";
+    };
+    toneSlider.valueFromTextFunction = [] (const juce::String& text)
+    {
+        return text.getDoubleValue() / 100.0;
     };
 
     dirtSlider.updateText();
@@ -386,7 +418,6 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     audioProcessor.getAPVTS().addParameterListener (AppConstants::UI_SCALE_ID, this);
 
     updateZoomLimits();
-    setResizable (true, false);
 
     applyZoom (uiScale);
     logZoomDiag ("ctor", uiScale, this);
@@ -430,6 +461,7 @@ void PapaloteAudioProcessorEditor::parentHierarchyChanged()
                 + juce::String (juce::roundToInt (W * safeThis->uiScale)) + "x"
                 + juce::String (juce::roundToInt (H * safeThis->uiScale)) + ")");
             safeSfw->setUsingNativeTitleBar (true);
+            safeSfw->setResizable (false, false);
             safeThis->setSize ((int) (W * safeThis->uiScale), (int) (H * safeThis->uiScale));
         });
     }
@@ -485,12 +517,16 @@ void PapaloteAudioProcessorEditor::updateZoomLimits()
                      juce::roundToInt (H * AppConstants::ZOOM_MIN),
                      juce::roundToInt (W * AppConstants::ZOOM_MAX),
                      juce::roundToInt (H * AppConstants::ZOOM_MAX));
+
+    setResizable (false, false);
 }
 
 void PapaloteAudioProcessorEditor::applyScaledFonts()
 {
     for (auto* l : { &dirtLabel, &dryWetDirtLabel, &toneLabel })
         l->setFont (customLookAndFeel.getCustomFont (22.0f));
+    for (auto* l : { &inputTrimValueLabel, &clipValueLabel })
+        l->setFont (customLookAndFeel.getCustomFont (24.0f));
     for (auto* l : { &tapeTypeLabel, &osFactorLabel })
         l->setFont (customLookAndFeel.getCustomFont (18.0f));
 }
@@ -571,6 +607,13 @@ void PapaloteAudioProcessorEditor::layoutControls (int w, int h)
 
     inputTrimSlider.setBounds (m.FADER_OUTER, faderY0, m.FADER_W, faderH);
     clipSlider.setBounds (w - m.FADER_OUTER - m.FADER_W, faderY0, m.FADER_W, faderH);
+
+    const int valueY = faderY0 + faderH + m.sc (13.0f);
+    const int valueH = m.sc (24.0f);
+    inputTrimValueLabel.setBounds (m.FADER_OUTER - m.LABEL_EXTRA / 2, valueY,
+                                   m.FADER_W + m.LABEL_EXTRA, valueH);
+    clipValueLabel.setBounds (w - m.FADER_OUTER - m.FADER_W - m.LABEL_EXTRA / 2, valueY,
+                              m.FADER_W + m.LABEL_EXTRA, valueH);
 
     {
         juce::Slider* sliders[NUM_ROWS] = { &dirtSlider, &dryWetDirtSlider, &toneSlider };

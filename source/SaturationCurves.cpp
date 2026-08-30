@@ -133,16 +133,6 @@ void interpolatedCoeffs(int type, float driveNorm,
                         + frac * (cHi[(size_t) i] - cLo[(size_t) i]);
 }
 
-// ── Naive (non-ADAA) evaluation with drive interpolation ──────────────────
-
-double naive(int type, double x, float driveNorm) noexcept
-{
-    x = std::clamp(x, -1.0, 1.0);
-    std::array<float, numCoeffs> c {};
-    interpolatedCoeffs(type, driveNorm, c);
-    return polyRaw(c, x);
-}
-
 // ── ADAA1 process ──────────────────────────────────────────────────────────
 
 float process(int type, double x, AdaaState& s, float driveNorm) noexcept

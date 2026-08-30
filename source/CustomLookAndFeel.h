@@ -176,7 +176,10 @@ public:
         }
         else if (slider.isHorizontal())
         {
-            layout.textBoxBounds = bounds.removeFromRight (juce::roundToInt (64.0f * uiScale)).translated (0, -1);
+            auto valueBox = bounds.removeFromRight (juce::roundToInt (64.0f * uiScale));
+            layout.textBoxBounds = valueBox.withSizeKeepingCentre (valueBox.getWidth(),
+                                                                   juce::roundToInt (24.0f * uiScale))
+                                           .translated (0, -1);
             layout.sliderBounds = bounds.reduced (juce::roundToInt (4.0f * uiScale), 0);
         }
         else

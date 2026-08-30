@@ -21,14 +21,20 @@ public:
                       float input_trim,
                       float process_amount,
                       int tape_type, float wet_dry_mix,
-                      float tone, int numSamples);
+                      float tone, int numSamples,
+                      double processSampleRate);
 
     void resetPreviousState();
 
     void setMode(int type);
 
-    void setSampleRate(double sr) { sampleRate = sr; }
-    void updateToneFilter(float tone);
+    void setSampleRate(double sr)
+    {
+        sampleRate = sr;
+        lastProcessSampleRate = -1.0;
+    }
+    void updateToneFilter(float tone, double fs);
+    void updateProcessingRate(double processSampleRate);
 
     struct TapeModeParameters
     {
@@ -42,7 +48,6 @@ public:
     };
 
 private:
-    // One ADAA state per stage: stage 2's input differs from stage 1's.
     papalote::satcurves::AdaaState adaaStage1;
     papalote::satcurves::AdaaState adaaStage2;
 
@@ -56,12 +61,16 @@ private:
     int pre_saturation_bypass = 0;
     int saturation_type = 0;
 
+    float effective_high_pass_filter_coefficient = 0.0f;
+    float effective_low_pass_filter_coefficient = 0.0f;
+    float diffCompensation = 1.0f;
+    double lastProcessSampleRate = -1.0;
+
     float previous_sample = 0.0f;
     float low_pass_filter_state = 0.0f;
 
     double sampleRate = 44100.0;
 
-    // ── Tone EQ: two cascaded biquads (low shelf + high shelf) ─────────────
     struct Biquad
     {
         double b0 = 0.0, b1 = 0.0, b2 = 0.0;
@@ -81,6 +90,7 @@ private:
     Biquad toneShelfLo;
     Biquad toneShelfHi;
     float lastTone = -1.0f;
+    double lastSampleRate = -1.0;
 
     static void computeLowShelf(Biquad& bq, double fc, double gainDb, double Q, double fs);
     static void computeHighShelf(Biquad& bq, double fc, double gainDb, double Q, double fs);

@@ -1,6 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include <algorithm>
+
 PapaloteAudioProcessor::PapaloteAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
     : AudioProcessor(BusesProperties()
@@ -116,13 +118,21 @@ void PapaloteAudioProcessor::rebuildOversamplingModule(int numChannels, int samp
         oversamplingModule = std::make_unique<juce::dsp::Oversampling<float>>(
             numChannels,
             factorIndex,
-            juce::dsp::Oversampling<float>::FilterType::filterHalfBandPolyphaseIIR);
+            juce::dsp::Oversampling<float>::FilterType::filterHalfBandFIREquiripple,
+            false, 
+            true); 
         oversamplingModule->reset();
         oversamplingModule->initProcessing(static_cast<size_t> (samplesPerBlock));
+
+        auto reported = static_cast<int> (std::llround (oversamplingModule->getLatencyInSamples()));
+        const int stageCount = factorIndex;
+        const int correction = (stageCount >= 2) ? 1 : 0;
+        setLatencySamples (reported + correction);
     }
     else
     {
         oversamplingModule.reset();
+        setLatencySamples (0);
     }
 
     needsOversamplingRebuild.store(false);
@@ -190,15 +200,24 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const float dryWet         = apvts.getRawParameterValue(AppConstants::DRY_WET_ID)->load();
     const float tone           = apvts.getRawParameterValue(AppConstants::TONE_ID)->load();
 
+    const double sampleRate = getSampleRate();
+
     juce::dsp::AudioBlock<float> fullBlock(buffer);
     auto activeBlock = fullBlock.getSubsetChannelBlock(0, (size_t) totalNumInputChannels);
 
     // processBlock only reads the module; rebuildOversamplingModule() holds the WriteLock.
     juce::ScopedReadLock rl(oversamplingLock);
 
+    const float outGain = juce::Decibels::decibelsToGain(
+        apvts.getRawParameterValue(AppConstants::CLIP_ID)->load());
+
     if (osToggle && oversamplingModule != nullptr)
     {
         auto upBlock = oversamplingModule->processSamplesUp(activeBlock);
+
+        const int osFactorIndex = static_cast<int> (
+            apvts.getRawParameterValue(AppConstants::OS_FACTOR_ID)->load());
+        const double processSampleRate = sampleRate * static_cast<double> (1 << osFactorIndex);
 
         for (size_t ch = 0; ch < (size_t) totalNumInputChannels; ++ch)
         {
@@ -207,7 +226,16 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 data, data,
                 inputTrimGain,
                 drive, tapeType, dryWet, tone,
-                static_cast<int>(upBlock.getNumSamples()));
+                static_cast<int>(upBlock.getNumSamples()),
+                processSampleRate);
+        }
+
+        for (size_t ch = 0; ch < (size_t) totalNumInputChannels; ++ch)
+        {
+            auto* d = upBlock.getChannelPointer(ch);
+            const auto n = upBlock.getNumSamples();
+            for (size_t i = 0; i < n; ++i)
+                d[i] = std::clamp(d[i] * outGain, -1.0f, 1.0f);
         }
 
         oversamplingModule->processSamplesDown(activeBlock);
@@ -221,13 +249,17 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 data, data,
                 inputTrimGain,
                 drive, tapeType, dryWet, tone,
-                buffer.getNumSamples());
+                buffer.getNumSamples(),
+                sampleRate);
+        }
+
+        for (int ch = 0; ch < totalNumInputChannels; ++ch)
+        {
+            auto* d = buffer.getWritePointer(ch);
+            for (int i = 0; i < buffer.getNumSamples(); ++i)
+                d[i] = std::clamp(d[i] * outGain, -1.0f, 1.0f);
         }
     }
-
-    const float outGain = juce::Decibels::decibelsToGain(
-        apvts.getRawParameterValue(AppConstants::CLIP_ID)->load());
-    buffer.applyGain(0, buffer.getNumSamples(), outGain);
 }
 
 bool PapaloteAudioProcessor::hasEditor() const { return true; }
