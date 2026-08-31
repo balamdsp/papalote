@@ -90,18 +90,20 @@ private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     std::unique_ptr<TapeEmulation> ptrTapeEmulation[2];
-    std::unique_ptr<juce::dsp::Oversampling<float>> oversamplingModule;
+    std::shared_ptr<juce::dsp::Oversampling<float>> oversamplingModule;
     juce::ReadWriteLock oversamplingLock;
 
     std::atomic<bool> needsOversamplingRebuild{false};
+    std::atomic<bool> rebuildingOversampling{false};
     bool osToggle = false;
 
     int currentSamplesPerBlock = 512;
 
+    double lastOversamplingRebuildTimeMs = 0.0;
+
     void handleAsyncUpdate() override;
     void rebuildOversamplingModule(int numChannels, int samplesPerBlock);
     void parameterChanged(const juce::String &parameterID, float newValue) override;
-    void applyModeToAll(int type);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PapaloteAudioProcessor)
 };

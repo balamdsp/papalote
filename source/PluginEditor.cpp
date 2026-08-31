@@ -16,33 +16,6 @@ static constexpr int NUM_ROWS = 3;
 
 static bool isInStandaloneApp (const juce::Component* c);
 
-// TEMP DIAGNOSTIC: emit timestamps/markers via OutputDebugString for debugview++.
-static void logZoomDiag (const juce::String& tag, float uiScale, const juce::Component* editor)
-{
-    try
-    {
-        juce::String line ("PAPALOTE: ");
-        line << tag << " uiScale=" << uiScale
-             << " editor=" << (editor != nullptr ? juce::String (editor->getWidth()) : "-1")
-                            << "x" << (editor != nullptr ? juce::String (editor->getHeight()) : "-1")
-             << " scale=" << (editor != nullptr ? editor->getTransform().getScaleFactor() : -1.0f);
-        if (editor != nullptr)
-        {
-            if (auto* tl = editor->getTopLevelComponent())
-                line << " top=" << tl->getWidth() << "x" << tl->getHeight();
-            if (auto* peer = editor->getPeer())
-                line << " peerScale=" << juce::String (peer->getPlatformScaleFactor());
-            line << " deskScale=" << juce::String (editor->getDesktopScaleFactor());
-        }
-        juce::Logger::outputDebugString (line);
-
-        juce::File logFile (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                                .getChildFile ("papalote_zoom_diag.txt"));
-        logFile.appendText (line + "\n");
-    }
-    catch (...) {}
-}
-
 // Scale-aware layout metrics. All values are the fixed logical sizes scaled
 // by the zoom factor; instantiate with the current uiScale.
 struct Metrics
@@ -229,8 +202,6 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
       audioProcessor (p),
       presetManager (&p)
 {
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: editor ctor | build ") + __DATE__ + " " + __TIME__
-                                     + " | standalone=" + (isInStandaloneApp (this) ? "yes" : "no"));
     setLookAndFeel (&customLookAndFeel);
     juce::LookAndFeel::setDefaultLookAndFeel (&customLookAndFeel);
 
@@ -420,33 +391,26 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     updateZoomLimits();
 
     applyZoom (uiScale);
-    logZoomDiag ("ctor", uiScale, this);
 }
 
 PapaloteAudioProcessorEditor::~PapaloteAudioProcessorEditor()
 {
-    setLookAndFeel (nullptr);
+    audioProcessor.getAPVTS().removeParameterListener(AppConstants::UI_SCALE_ID, this);
+    setLookAndFeel(nullptr);
 }
 
 void PapaloteAudioProcessorEditor::parentHierarchyChanged()
 {
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: parentHierarchyChanged topLevelIsWindow=")
-                                     + (topLevelIsWindow ? "yes" : "no")
-                                     + " hasPeer=" + (getPeer() != nullptr ? "yes" : "no"));
     if (topLevelIsWindow)
         return;
 
 #if JUCE_WINDOWS
     if (auto* peer = getPeer())
-    {
         peer->setCustomPlatformScaleFactor (1.0);
-        logZoomDiag ("parentHierarchy", uiScale, this);
-    }
 #endif
 
     if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (getTopLevelComponent()))
     {
-        juce::Logger::outputDebugString ("PAPALOTE: standalone window detected");
         topLevelIsWindow = true;
 
         // SafePointer: the editor or the standalone window may be destroyed
@@ -457,9 +421,6 @@ void PapaloteAudioProcessorEditor::parentHierarchyChanged()
         {
             if (safeSfw == nullptr || safeThis == nullptr)
                 return;
-            juce::Logger::outputDebugString ("PAPALOTE: async resize editor->setSize("
-                + juce::String (juce::roundToInt (W * safeThis->uiScale)) + "x"
-                + juce::String (juce::roundToInt (H * safeThis->uiScale)) + ")");
             safeSfw->setUsingNativeTitleBar (true);
             safeSfw->setResizable (false, false);
             safeThis->setSize ((int) (W * safeThis->uiScale), (int) (H * safeThis->uiScale));
@@ -474,15 +435,11 @@ void PapaloteAudioProcessorEditor::paint (juce::Graphics& g)
 
 void PapaloteAudioProcessorEditor::resized()
 {
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: resized ")
-                                     + juce::String (getWidth()) + "x" + juce::String (getHeight()));
     layoutControls (getWidth(), getHeight());
 }
 
 void PapaloteAudioProcessorEditor::applyZoom (float scale)
 {
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: applyZoom request=") + juce::String (scale)
-                                     + " before editor=" + juce::String (getWidth()) + "x" + juce::String (getHeight()));
     scale = juce::jlimit (AppConstants::ZOOM_MIN, AppConstants::ZOOM_MAX, scale);
     uiScale = scale;
     customLookAndFeel.setScale (uiScale);
@@ -494,21 +451,14 @@ void PapaloteAudioProcessorEditor::applyZoom (float scale)
     const auto target = juce::Rectangle<int> (0, 0,
                                               juce::roundToInt (W * uiScale),
                                               juce::roundToInt (H * uiScale));
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: applyZoom target=") + juce::String (target.getWidth())
-                                     + "x" + juce::String (target.getHeight()));
     setSize (target.getWidth(), target.getHeight());
 
     if (isInStandaloneApp (this))
         if (auto* tl = getTopLevelComponent())
-        {
-            juce::Logger::outputDebugString (juce::String ("PAPALOTE: applyZoom resizing top-level to ")
-                                             + juce::String (target.getWidth()) + "x" + juce::String (target.getHeight()));
             tl->setSize (target.getWidth(), target.getHeight());
-        }
 
     resized();
     repaint();
-    logZoomDiag ("applyZoom", uiScale, this);
 }
 
 void PapaloteAudioProcessorEditor::updateZoomLimits()
@@ -533,7 +483,6 @@ void PapaloteAudioProcessorEditor::applyScaledFonts()
 
 void PapaloteAudioProcessorEditor::parameterChanged (const juce::String& parameterID, float /*newValue*/)
 {
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: parameterChanged id=") + parameterID);
     if (parameterID != AppConstants::UI_SCALE_ID)
         return;
 
@@ -542,7 +491,6 @@ void PapaloteAudioProcessorEditor::parameterChanged (const juce::String& paramet
         return;
 
     const int idx = juce::roundToInt (scaleParam->getValue() * (AppConstants::ZOOM_PERCENTS.size() - 1));
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: parameterChanged idx=") + juce::String (idx));
     applyZoom (AppConstants::ZOOM_PERCENTS [juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f);
 }
 
@@ -713,7 +661,6 @@ static bool isInStandaloneApp (const juce::Component* c)
 
 void PapaloteAudioProcessorEditor::showHamburgerMenu()
 {
-    juce::Logger::outputDebugString ("PAPALOTE: showHamburgerMenu");
     juce::PopupMenu menu;
 
     menu.addItem (HamburgerMenuOption::Init, "Init");
@@ -759,14 +706,10 @@ void PapaloteAudioProcessorEditor::showHamburgerMenu()
 
 void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
 {
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: handleMenuResult selectedId=")
-                                     + juce::String (selectedId));
     if (selectedId >= HamburgerMenuOption::ZoomBase
         && selectedId < HamburgerMenuOption::ZoomBase + (int) AppConstants::ZOOM_PERCENTS.size())
     {
         const int idx = selectedId - HamburgerMenuOption::ZoomBase;
-        juce::Logger::outputDebugString (juce::String ("PAPALOTE: zoom selected idx=") + juce::String (idx)
-                                         + " percent=" + juce::String ((int) AppConstants::ZOOM_PERCENTS[idx]));
         auto* scaleParam = audioProcessor.getAPVTS().getParameter (AppConstants::UI_SCALE_ID);
         if (scaleParam != nullptr)
         {

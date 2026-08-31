@@ -17,11 +17,12 @@ PapaloteAudioProcessor::PapaloteAudioProcessor()
 #endif
 {
     apvts.addParameterListener(AppConstants::OS_FACTOR_ID, this);
-    apvts.addParameterListener(AppConstants::TAPE_TYPE_ID, this);
-    juce::Logger::outputDebugString (juce::String ("PAPALOTE: processor ctor | build ") + __DATE__ + " " + __TIME__);
 }
 
-PapaloteAudioProcessor::~PapaloteAudioProcessor() {}
+PapaloteAudioProcessor::~PapaloteAudioProcessor()
+{
+    apvts.removeParameterListener(AppConstants::OS_FACTOR_ID, this);
+}
 
 juce::AudioProcessorValueTreeState::ParameterLayout
 PapaloteAudioProcessor::createParameterLayout()
@@ -73,35 +74,35 @@ PapaloteAudioProcessor::createParameterLayout()
     return { params.begin(), params.end() };
 }
 
-void PapaloteAudioProcessor::parameterChanged(const juce::String& parameterID, float newValue)
+void PapaloteAudioProcessor::parameterChanged(const juce::String& parameterID, float /*newValue*/)
 {
     if (parameterID == AppConstants::OS_FACTOR_ID)
     {
         needsOversamplingRebuild.store(true);
         triggerAsyncUpdate();
     }
-    else if (parameterID == AppConstants::TAPE_TYPE_ID)
-    {
-        applyModeToAll(static_cast<int> (apvts.getRawParameterValue(AppConstants::TAPE_TYPE_ID)->load()));
-    }
-}
-
-void PapaloteAudioProcessor::applyModeToAll(int type)
-{
-    for (int i = 0; i < getTotalNumInputChannels(); ++i)
-        if (ptrTapeEmulation[i])
-        {
-            ptrTapeEmulation[i]->setMode(type);
-            ptrTapeEmulation[i]->resetPreviousState();
-        }
 }
 
 void PapaloteAudioProcessor::handleAsyncUpdate()
 {
-    if (needsOversamplingRebuild.load())
+    if (! needsOversamplingRebuild.load())
+        return;
+
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const double elapsed = now - lastOversamplingRebuildTimeMs;
+    if (elapsed < 150.0)
     {
-        rebuildOversamplingModule(getTotalNumInputChannels(), currentSamplesPerBlock);
+        triggerAsyncUpdate();
+        return;
     }
+
+    bool expected = false;
+    if (! rebuildingOversampling.compare_exchange_strong(expected, true))
+        return;
+
+    rebuildOversamplingModule(getTotalNumInputChannels(), currentSamplesPerBlock);
+    lastOversamplingRebuildTimeMs = juce::Time::getMillisecondCounterHiRes();
+    rebuildingOversampling.store(false);
 }
 
 void PapaloteAudioProcessor::rebuildOversamplingModule(int numChannels, int samplesPerBlock)
@@ -109,29 +110,34 @@ void PapaloteAudioProcessor::rebuildOversamplingModule(int numChannels, int samp
     const int factorIndex = static_cast<int> (
         apvts.getRawParameterValue(AppConstants::OS_FACTOR_ID)->load());
 
-    juce::ScopedWriteLock wl(oversamplingLock);
-
-    osToggle = factorIndex > 0;
-
-    if (osToggle)
+    if (factorIndex > 0)
     {
-        oversamplingModule = std::make_unique<juce::dsp::Oversampling<float>>(
+        auto newModule = std::make_shared<juce::dsp::Oversampling<float>>(
             numChannels,
             factorIndex,
             juce::dsp::Oversampling<float>::FilterType::filterHalfBandFIREquiripple,
-            false, 
-            true); 
-        oversamplingModule->reset();
-        oversamplingModule->initProcessing(static_cast<size_t> (samplesPerBlock));
+            false,
+            true);
+        newModule->reset();
+        newModule->initProcessing(static_cast<size_t> (samplesPerBlock));
 
-        auto reported = static_cast<int> (std::llround (oversamplingModule->getLatencyInSamples()));
-        const int stageCount = factorIndex;
-        const int correction = (stageCount >= 2) ? 1 : 0;
-        setLatencySamples (reported + correction);
+        auto reported = static_cast<int> (std::llround (newModule->getLatencyInSamples()));
+        const int totalLatency = reported;
+
+        {
+            juce::ScopedWriteLock wl(oversamplingLock);
+            oversamplingModule = newModule;
+            osToggle = true;
+        }
+        setLatencySamples (totalLatency);
     }
     else
     {
-        oversamplingModule.reset();
+        {
+            juce::ScopedWriteLock wl(oversamplingLock);
+            oversamplingModule.reset();
+            osToggle = false;
+        }
         setLatencySamples (0);
     }
 
@@ -205,15 +211,20 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     juce::dsp::AudioBlock<float> fullBlock(buffer);
     auto activeBlock = fullBlock.getSubsetChannelBlock(0, (size_t) totalNumInputChannels);
 
-    // processBlock only reads the module; rebuildOversamplingModule() holds the WriteLock.
-    juce::ScopedReadLock rl(oversamplingLock);
+    std::shared_ptr<juce::dsp::Oversampling<float>> osModule;
+    bool useOversampling = false;
+    {
+        juce::ScopedReadLock rl(oversamplingLock);
+        osModule = oversamplingModule;
+        useOversampling = osToggle;
+    }
 
     const float outGain = juce::Decibels::decibelsToGain(
         apvts.getRawParameterValue(AppConstants::CLIP_ID)->load());
 
-    if (osToggle && oversamplingModule != nullptr)
+    if (useOversampling && osModule != nullptr)
     {
-        auto upBlock = oversamplingModule->processSamplesUp(activeBlock);
+        auto upBlock = osModule->processSamplesUp(activeBlock);
 
         const int osFactorIndex = static_cast<int> (
             apvts.getRawParameterValue(AppConstants::OS_FACTOR_ID)->load());
@@ -238,7 +249,7 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 d[i] = std::clamp(d[i] * outGain, -1.0f, 1.0f);
         }
 
-        oversamplingModule->processSamplesDown(activeBlock);
+        osModule->processSamplesDown(activeBlock);
     }
     else
     {
@@ -265,7 +276,6 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
 bool PapaloteAudioProcessor::hasEditor() const { return true; }
 juce::AudioProcessorEditor* PapaloteAudioProcessor::createEditor()
 {
-    juce::Logger::outputDebugString ("PAPALOTE: createEditor called");
     return new PapaloteAudioProcessorEditor(*this);
 }
 
