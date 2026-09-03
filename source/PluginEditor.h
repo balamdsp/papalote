@@ -99,6 +99,81 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SaveAsDialog)
 };
 
+class ConfirmDialog : public juce::Component
+{
+public:
+    ConfirmDialog (const juce::String& titleText, const juce::String& messageText,
+                   float scale = 1.0f)
+    {
+        uiScale = scale;
+        papaloteDialogLnf().setScale (uiScale);
+        setLookAndFeel (&papaloteDialogLnf());
+
+        titleLabel.setText (titleText, juce::dontSendNotification);
+        titleLabel.setFont (CustomLookAndFeel::makeFont (19.0f * uiScale));
+        titleLabel.setColour (juce::Label::textColourId,
+                              PapaloteColors::textPrimary.withAlpha (0.50f));
+        addAndMakeVisible (titleLabel);
+
+        messageLabel.setText (messageText, juce::dontSendNotification);
+        messageLabel.setFont (CustomLookAndFeel::makeFont (22.0f * uiScale));
+        messageLabel.setColour (juce::Label::textColourId,
+                                PapaloteColors::textPrimary);
+        addAndMakeVisible (messageLabel);
+
+        cancelButton.setButtonText ("CANCEL");
+        cancelButton.onClick = [this] { closeWindow(); };
+        addAndMakeVisible (cancelButton);
+
+        confirmButton.setButtonText ("CONFIRM");
+        confirmButton.onClick = [this]
+        {
+            if (onConfirm)
+                onConfirm();
+            closeWindow();
+        };
+        addAndMakeVisible (confirmButton);
+    }
+
+    ~ConfirmDialog() override { setLookAndFeel (nullptr); }
+
+    std::function<void()> onConfirm;
+
+    void paint (juce::Graphics& g) override
+    {
+        paintCardLayers (g, getLocalBounds().toFloat());
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (juce::roundToInt (25.0f * uiScale));
+
+        titleLabel.setBounds (area.removeFromTop (juce::roundToInt (21.0f * uiScale)));
+        area.removeFromTop (juce::roundToInt (5.0f * uiScale));
+        messageLabel.setBounds (area.removeFromTop (juce::roundToInt (52.0f * uiScale)));
+        area.removeFromTop (juce::roundToInt (12.0f * uiScale));
+
+        auto buttonsRow = area.removeFromBottom (juce::roundToInt (30.0f * uiScale));
+        cancelButton.setBounds (buttonsRow.removeFromRight (juce::roundToInt (150.0f * uiScale)));
+        buttonsRow.removeFromRight (juce::roundToInt (10.0f * uiScale));
+        confirmButton.setBounds (buttonsRow.removeFromRight (juce::roundToInt (190.0f * uiScale)));
+    }
+
+private:
+    void closeWindow()
+    {
+        if (auto* dw = findParentComponentOfClass<juce::DocumentWindow>())
+            dw->closeButtonPressed();
+    }
+
+    float uiScale = 1.0f;
+
+    juce::Label titleLabel, messageLabel;
+    juce::TextButton confirmButton, cancelButton;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ConfirmDialog)
+};
+
 class PapaloteAudioProcessorEditor : public juce::AudioProcessorEditor,
                                      public juce::Button::Listener,
                                      public juce::AudioProcessorValueTreeState::Listener

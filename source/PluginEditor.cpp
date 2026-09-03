@@ -1027,22 +1027,17 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
 
 void PapaloteAudioProcessorEditor::displayInitPopup()
 {
-    auto options = juce::MessageBoxOptions()
-        .withIconType (juce::AlertWindow::NoIcon)
-        .withTitle ("Init")
-        .withMessage ("Are you sure you want to initialize this preset?")
-        .withButton ("Confirm")
-        .withButton ("Cancel")
-        .withAssociatedComponent (this);
-
-    juce::AlertWindow::showAsync (options, [this] (int result)
+    auto* dialog = new ConfirmDialog (">> INIT",
+                                      "Are you sure you want to initialize this preset?",
+                                      uiScale);
+    dialog->onConfirm = [this]
     {
-        if (result == 1)
-        {
-            presetManager.createNewPreset();
-            updatePresetDisplay();
-        }
-    });
+        presetManager.createNewPreset();
+        updatePresetDisplay();
+    };
+    PapaloteDialogs::openWindow (dialog, "Init", this,
+                                 juce::roundToInt (460.0f * uiScale),
+                                 juce::roundToInt (220.0f * uiScale));
 }
 
 void PapaloteAudioProcessorEditor::displaySaveAsPopup()

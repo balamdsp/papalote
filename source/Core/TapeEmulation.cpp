@@ -132,7 +132,8 @@ void TapeEmulation::processAudio(float *input, float *output,
                                  int numSamples,
                                  double processSampleRate)
 {
-    juce::ignoreUnused(tape_type);
+    if (tape_type != tape_model_type)
+        setMode (tape_type);
 
     float p_dec = process_amount / PROCESS_AMOUNT_MAX;
     float drivePre = 1.0f;
