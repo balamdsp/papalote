@@ -1,5 +1,5 @@
 #include "PresetManager.h"
-#include "PluginProcessor.h"
+#include "../PluginProcessor.h"
 
 using namespace juce;
 
@@ -35,6 +35,18 @@ bool PresetManager::setPresetDirectory (const String& directory)
     return false;
 }
 
+void PresetManager::setCrtEnabled (bool enabled)
+{
+    mCrtEnabled = enabled;
+    savePresetDirectorySettings();
+}
+
+void PresetManager::setCrtStrength (int strength)
+{
+    mCrtStrength = jlimit (0, 2, strength);
+    savePresetDirectorySettings();
+}
+
 void PresetManager::resetPresetDirectoryToDefault()
 {
     mPresetDirectory = File::getSpecialLocation (File::userApplicationDataDirectory)
@@ -56,6 +68,11 @@ void PresetManager::ensurePresetDirectoryExists()
 
 File PresetManager::getSettingsFile() const
 {
+    return File (mPresetDirectory).getParentDirectory().getChildFile ("settings.xml");
+}
+
+File PresetManager::getBookmarkFile() const
+{
     return File::getSpecialLocation (File::userApplicationDataDirectory)
         .getChildFile ("BalamDSP")
         .getChildFile ("Papalote")
@@ -64,16 +81,47 @@ File PresetManager::getSettingsFile() const
 
 void PresetManager::loadPresetDirectorySettings()
 {
-    File settingsFile = getSettingsFile();
-    if (settingsFile.existsAsFile())
+    String storedDir;
     {
-        std::unique_ptr<XmlElement> xml (XmlDocument::parse (settingsFile));
-        if (xml != nullptr)
-            mPresetDirectory = xml->getStringAttribute ("presetDirectory", "");
+        File bookmarkFile = getBookmarkFile();
+        if (bookmarkFile.existsAsFile())
+        {
+            std::unique_ptr<XmlElement> xml (XmlDocument::parse (bookmarkFile));
+            if (xml != nullptr)
+            {
+                storedDir = xml->getStringAttribute ("presetDirectory", "");
+                mCrtEnabled = xml->getBoolAttribute ("crtEnabled", mCrtEnabled);
+                mCrtStrength = jlimit (0, 2, xml->getIntAttribute ("crtStrength", mCrtStrength));
+            }
+        }
     }
 
-    if (mPresetDirectory.isEmpty())
+    if (storedDir.isEmpty())
+    {
         resetPresetDirectoryToDefault();
+        return;
+    }
+
+    mPresetDirectory = storedDir;
+
+    // If the whole folder was relocated, the settings file that travels with
+    // the presets is authoritative over the fixed bookmark.
+    mLastSettingsFile = getSettingsFile();
+    if (mLastSettingsFile.existsAsFile())
+    {
+        std::unique_ptr<XmlElement> xml (XmlDocument::parse (mLastSettingsFile));
+        if (xml != nullptr)
+        {
+            const String dir = xml->getStringAttribute ("presetDirectory", "");
+            if (! dir.isEmpty())
+            {
+                mPresetDirectory = dir;
+                mLastSettingsFile = getSettingsFile();
+            }
+            mCrtEnabled = xml->getBoolAttribute ("crtEnabled", mCrtEnabled);
+            mCrtStrength = jlimit (0, 2, xml->getIntAttribute ("crtStrength", mCrtStrength));
+        }
+    }
 }
 
 void PresetManager::savePresetDirectorySettings()
@@ -83,7 +131,25 @@ void PresetManager::savePresetDirectorySettings()
 
     XmlElement xml ("PapaloteSettings");
     xml.setAttribute ("presetDirectory", mPresetDirectory);
+    xml.setAttribute ("crtEnabled", mCrtEnabled);
+    xml.setAttribute ("crtStrength", mCrtStrength);
+
     xml.writeTo (settingsFile);
+
+    File bookmarkFile = getBookmarkFile();
+    if (bookmarkFile != settingsFile)
+    {
+        bookmarkFile.getParentDirectory().createDirectory();
+        xml.writeTo (bookmarkFile);
+    }
+
+    // Drop a stale portable copy left behind by a previous preset folder.
+    if (mLastSettingsFile.existsAsFile()
+        && mLastSettingsFile != settingsFile
+        && mLastSettingsFile != bookmarkFile)
+        mLastSettingsFile.deleteFile();
+
+    mLastSettingsFile = settingsFile;
 }
 
 void PresetManager::storeLocalPresets()
@@ -92,7 +158,8 @@ void PresetManager::storeLocalPresets()
     File dir (mPresetDirectory);
     if (dir.isDirectory())
     {
-        for (auto& entry : RangedDirectoryIterator (dir, false, "*" + String (PAPALOTE_PRESET_EXTENSION)))
+        // Recursive; full-path sort == relative-path order under one root.
+        for (auto& entry : RangedDirectoryIterator (dir, true, "*" + String (PAPALOTE_PRESET_EXTENSION)))
             mLocalPresets.add (entry.getFile());
         mLocalPresets.sort();
     }
@@ -107,6 +174,13 @@ String PresetManager::getPresetName (int index)
 {
     if (isPositiveAndBelow (index, mLocalPresets.size()))
         return mLocalPresets[index].getFileNameWithoutExtension();
+    return {};
+}
+
+File PresetManager::getPresetFile (int index) const
+{
+    if (isPositiveAndBelow (index, mLocalPresets.size()))
+        return mLocalPresets[index];
     return {};
 }
 
@@ -183,7 +257,16 @@ bool PresetManager::loadPreset (int index)
     if (! isPositiveAndBelow (index, mLocalPresets.size()))
         return false;
 
-    const auto presetFile = mLocalPresets[index];
+    return loadPresetFile (mLocalPresets[index]);
+}
+
+// Any .papalote file, inside or outside the preset folder. A later Save
+// writes back to the picked file via mCurrentlyLoadedPreset.
+bool PresetManager::loadPresetFile (const File& presetFile)
+{
+    if (! presetFile.existsAsFile())
+        return false;
+
     MemoryBlock block;
     if (presetFile.loadFileAsData (block))
     {

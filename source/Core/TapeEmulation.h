@@ -21,7 +21,7 @@ public:
                       float input_trim,
                       float process_amount,
                       int tape_type, float wet_dry_mix,
-                      float tone, int numSamples,
+                      float tone, bool toneExtra, bool driveExtra, int numSamples,
                       double processSampleRate);
 
     void resetPreviousState();
@@ -33,7 +33,7 @@ public:
         sampleRate = sr;
         lastProcessSampleRate = -1.0;
     }
-    void updateToneFilter(float tone, double fs);
+    void updateToneFilter(float tone, bool extra, double fs);
     void updateProcessingRate(double processSampleRate);
 
     struct TapeModeParameters
@@ -90,6 +90,7 @@ private:
     Biquad toneShelfLo;
     Biquad toneShelfHi;
     float lastTone = -1.0f;
+    bool lastToneExtra = false;
     double lastSampleRate = -1.0;
 
     static void computeLowShelf(Biquad& bq, double fc, double gainDb, double Q, double fs);

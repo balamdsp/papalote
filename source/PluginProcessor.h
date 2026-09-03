@@ -1,7 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "TapeEmulation.h"
+#include "Core/TapeEmulation.h"
 
 namespace AppConstants
 {
@@ -12,6 +12,8 @@ namespace AppConstants
     inline constexpr const char *OS_FACTOR_ID = "os_factor";
     inline constexpr const char *BYPASS_ID = "bypass";
     inline constexpr const char *TONE_ID = "tone";
+    inline constexpr const char *XTONE_ID = "xtone";
+    inline constexpr const char *XDRIVE_ID = "xdrive";
 
     inline constexpr const char *CLIP_ID = "clip";
 
@@ -63,6 +65,7 @@ public:
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
 #endif
 
+    using AudioProcessor::processBlock;
     void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
 
     juce::AudioProcessorEditor *createEditor() override;

@@ -47,7 +47,6 @@ constexpr std::array<std::array<float, numCoeffs>, 4> LusTable = {{
     { -0.000009f, 2.935392f, 0.000457f, -7.812387f, -0.000909f, 9.919794f, 0.000496f, -4.104297f }
 }};
 
-// ── Per-type table accessors ───────────────────────────────────────────────
 
 struct TypeInfo
 {
@@ -73,7 +72,6 @@ inline constexpr int kStride = numCoeffs;
 
 } // anonymous namespace
 
-// ── Public accessors ───────────────────────────────────────────────────────
 
 int numDriveLevels(int type) noexcept
 {
@@ -88,7 +86,6 @@ const std::array<float, numCoeffs>& driveCoeffs(int type, int level) noexcept
         info.ptr + clamped * kStride);
 }
 
-// ── Polynomial evaluation (standard form) ──────────────────────────────────
 // P(x) = c0 + c1*x + c2*x^2 + ... + c7*x^7
 
 double polyRaw(const std::array<float, numCoeffs>& c, double x) noexcept
@@ -99,7 +96,6 @@ double polyRaw(const std::array<float, numCoeffs>& c, double x) noexcept
     return a;
 }
 
-// ── Antiderivative F(x) = c0*x + c1*x^2/2 + ... + c7*x^8/8 ──────────────
 
 double antiDerivRaw(const std::array<float, numCoeffs>& c, double x) noexcept
 {
@@ -112,7 +108,6 @@ double antiDerivRaw(const std::array<float, numCoeffs>& c, double x) noexcept
     return a * x;
 }
 
-// ── Interpolated coefficient lookup ────────────────────────────────────────
 
 void interpolatedCoeffs(int type, float driveNorm,
                         std::array<float, numCoeffs>& out) noexcept
@@ -133,7 +128,6 @@ void interpolatedCoeffs(int type, float driveNorm,
                         + frac * (cHi[(size_t) i] - cLo[(size_t) i]);
 }
 
-// ── ADAA1 process ──────────────────────────────────────────────────────────
 
 float process(int type, double x, AdaaState& s, float driveNorm) noexcept
 {

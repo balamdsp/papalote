@@ -2,10 +2,10 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-#include "CustomLookAndFeel.h"
-#include "CRTScreen.h"
-#include "PresetManager.h"
-#include "AboutWindow.h"
+#include "Components/CustomLookAndFeel.h"
+#include "Components/CRTScreen.h"
+#include "Helpers/PresetManager.h"
+#include "Components/AboutWindow.h"
 
 class SaveAsDialog : public juce::Component
 {
@@ -121,6 +121,7 @@ private:
     int uiScaleIndex() const;
 
     CustomLookAndFeel customLookAndFeel;
+    PapaloteAudioProcessor& audioProcessor;
     PresetManager presetManager;
 
     float uiScale = 1.0f;
@@ -151,6 +152,8 @@ private:
     HamburgerButton  menuButton;
 
     void showPresetMenu();
+    void addPresetLevel (juce::PopupMenu& parent, const juce::File& dir);
+    void loadPresetFileDialog();
     void showHamburgerMenu();
     void handleMenuResult (int selectedId);
     void updatePresetDisplay();
@@ -173,6 +176,7 @@ private:
 
     juce::Slider dirtSlider, dryWetDirtSlider, toneSlider;
     juce::Label  dirtLabel, dryWetDirtLabel, toneLabel;
+    juce::ToggleButton xdriveButton, xtoneButton;
 
     HoverableComboBox tapeTypeComboBox, osFactorComboBox;
     juce::Label    tapeTypeLabel, osFactorLabel;
@@ -186,9 +190,9 @@ private:
                                        dirtAttachment, dryWetDirtAttachment,
                                        toneAttachment;
     std::unique_ptr<ComboBoxAttachment> tapeTypeAttachment, osFactorAttachment;
-    std::unique_ptr<ButtonAttachment>   bypassAttachment;
+    std::unique_ptr<ButtonAttachment>   bypassAttachment, xdriveAttachment,
+                                        xtoneAttachment;
 
-    PapaloteAudioProcessor& audioProcessor;
     bool topLevelIsWindow = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PapaloteAudioProcessorEditor)

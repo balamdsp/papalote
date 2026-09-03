@@ -1,20 +1,44 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "AudioSettingsPanel.h"
-#include "AboutWindow.h"
+#include "Components/AudioSettingsPanel.h"
+#include "Components/AboutWindow.h"
 
 #include <cmath>
 #include <limits>
 
 #if JucePlugin_Build_Standalone
-#include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
+#include "Standalone/CustomStandaloneFilterWindow.h"
 #endif
+
+// X11 standalone: _NET_FRAME_EXTENTS for outer sizing. Xlib TU is separate
+// (Xlib headers clash with JUCE); queried rarely (zoom + window settle).
+extern "C" int papaloteGetFrameExtents (unsigned long windowH,
+                                        int* outFrameW, int* outFrameH);
 
 static constexpr int W = 800;
 static constexpr int H = 460;
 static constexpr int NUM_ROWS = 3;
 
+// Preset-menu sentinel: clear of index+1 item IDs at any list size.
+static constexpr int kLoadFromFileId = 0x1001;
+
 static bool isInStandaloneApp (const juce::Component* c);
+
+static juce::Point<int> getNativeFrameSize (juce::Component* topLevelWindow)
+{
+    if (topLevelWindow != nullptr)
+        if (auto* peer = topLevelWindow->getPeer())
+            if (peer->getNativeHandle() != nullptr)
+            {
+                int frameW = 0, frameH = 0;
+
+                if (papaloteGetFrameExtents ((unsigned long) peer->getNativeHandle(),
+                                             &frameW, &frameH) != 0)
+                    return { frameW, frameH };
+            }
+
+    return {};
+}
 
 // Scale-aware layout metrics. All values are the fixed logical sizes scaled
 // by the zoom factor; instantiate with the current uiScale.
@@ -52,6 +76,8 @@ struct Metrics
     int labelH       = sc (26.0f);
     int sliderH      = sc (44.0f);
     int rowGap       = sc (8.0f);
+    int xButtonW     = sc (92.0f);
+    int xButtonH     = sc (24.0f);
 
     int totalFooterW = matLabelW + matComboW + footerGap
                      + osLabelW + osComboW + footerGap + bypassW;
@@ -82,7 +108,7 @@ void PapaloteAudioProcessorEditor::ScreenContent::paint (juce::Graphics& g)
     const int h = getHeight();
     const float s = (float) w / (float) W;
     const Metrics m (s);
-    const auto mf = [] (float size, float s) { return CustomLookAndFeel::makeFont (size * s); };
+    const auto mf = [] (float size, float sc) { return CustomLookAndFeel::makeFont (size * sc); };
 
     g.fillAll (background);
 
@@ -102,10 +128,17 @@ void PapaloteAudioProcessorEditor::ScreenContent::paint (juce::Graphics& g)
         if (cursorVisible)
         {
             const auto titleFont = mf (38.0f, s);
-            const float bannerWidth = juce::GlyphArrangement::getStringWidth (titleFont, "PAPALOTE...");
+            const float bannerWidth = (float) juce::GlyphArrangement::getStringWidthInt (titleFont, "PAPALOTE...");
+            const float asc = titleFont.getAscent();
+            const float desc = titleFont.getDescent();
+            const float boxY = (float) m.sc (12.0f);
+            const float boxH = (float) m.sc (32.0f);
+            const float baseline = boxY + (boxH - (asc + desc)) * 0.5f + asc;
+            const float curTop = baseline - asc * 0.7f - (float) m.sc (2.0f);
+            const float curBottom = baseline + (float) m.sc (1.0f);
             g.setColour (textBrand.withAlpha (0.85f));
-            g.fillRect ((float) titleX + bannerWidth + (float) m.sc (4.0f),
-                        (float) m.sc (18.0f), (float) m.sc (8.0f), (float) m.sc (28.0f));
+            g.fillRect ((float) titleX + bannerWidth + (float) m.sc (8.0f),
+                        curTop, (float) m.sc (13.0f), curBottom - curTop);
         }
 
         g.setColour (textMid);
@@ -208,7 +241,8 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     if (auto* scaleParam = audioProcessor.getAPVTS().getParameter (AppConstants::UI_SCALE_ID))
     {
         const int idx = juce::roundToInt (scaleParam->getValue() * (AppConstants::ZOOM_PERCENTS.size() - 1));
-        uiScale = AppConstants::ZOOM_PERCENTS [juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f;
+        const int clampedIdx = juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx);
+        uiScale = AppConstants::ZOOM_PERCENTS [(size_t) clampedIdx] / 100.0f;
     }
     customLookAndFeel.setScale (uiScale);
 
@@ -312,6 +346,18 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     toneAttachment = std::make_unique<SliderAttachment> (
         audioProcessor.getAPVTS(), AppConstants::TONE_ID, toneSlider);
 
+    xdriveButton.setButtonText ("X-DRIVE");
+    xdriveButton.setRepaintsOnMouseActivity (true);
+    screenContent.addAndMakeVisible (xdriveButton);
+    xdriveAttachment = std::make_unique<ButtonAttachment> (
+        audioProcessor.getAPVTS(), AppConstants::XDRIVE_ID, xdriveButton);
+
+    xtoneButton.setButtonText ("X-TONE");
+    xtoneButton.setRepaintsOnMouseActivity (true);
+    screenContent.addAndMakeVisible (xtoneButton);
+    xtoneAttachment = std::make_unique<ButtonAttachment> (
+        audioProcessor.getAPVTS(), AppConstants::XTONE_ID, xtoneButton);
+
     dirtSlider.setNormalisableRange ({ (double) AppConstants::DRIVE_MIN,
                                        (double) AppConstants::DRIVE_MAX, 0.01 });
     dryWetDirtSlider.setNormalisableRange ({ (double) AppConstants::DRY_WET_MIN,
@@ -359,7 +405,7 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
     tapeTypeAttachment = std::make_unique<ComboBoxAttachment> (
         audioProcessor.getAPVTS(), AppConstants::TAPE_TYPE_ID, tapeTypeComboBox);
 
-    osFactorComboBox.addItem ("x1", 1);
+    osFactorComboBox.addItem ("1x", 1);
     osFactorComboBox.addItem ("2x", 2);
     osFactorComboBox.addItem ("4x", 3);
     osFactorComboBox.addItem ("8x", 4);
@@ -388,9 +434,21 @@ PapaloteAudioProcessorEditor::PapaloteAudioProcessorEditor (PapaloteAudioProcess
 
     audioProcessor.getAPVTS().addParameterListener (AppConstants::UI_SCALE_ID, this);
 
+    crtEnabled.store (presetManager.getCrtEnabled());
+    crtOverlay.setCrtStrength (presetManager.getCrtStrength());
+
     updateZoomLimits();
 
     applyZoom (uiScale);
+
+    // Standalone startup race: the wrapper clamps back to resize minimum,
+    // discarding this zoom. Re-assert once settled.
+    if (isInStandaloneApp (this))
+        juce::Timer::callAfterDelay (250, [safeThis = juce::Component::SafePointer<PapaloteAudioProcessorEditor> (this)]
+        {
+            if (safeThis != nullptr)
+                safeThis->applyZoom (safeThis->uiScale);
+        });
 }
 
 PapaloteAudioProcessorEditor::~PapaloteAudioProcessorEditor()
@@ -404,27 +462,52 @@ void PapaloteAudioProcessorEditor::parentHierarchyChanged()
     if (topLevelIsWindow)
         return;
 
-#if JUCE_WINDOWS
-    if (auto* peer = getPeer())
-        peer->setCustomPlatformScaleFactor (1.0);
-#endif
-
-    if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (getTopLevelComponent()))
+    // Recolour host ResizableWindow wrappers too (dynamic_cast no-ops).
+    //
+    // NOTE: no setUsingNativeTitleBar() here: fires mid-updateContent(),
+    // recreating the peer then sticks standalone at 128x128 minimum.
+    if (auto* sfw = dynamic_cast<juce::ResizableWindow*> (getTopLevelComponent()))
     {
         topLevelIsWindow = true;
+        sfw->setColour (juce::ResizableWindow::backgroundColourId, PapaloteColors::background);
 
-        // SafePointer: the editor or the standalone window may be destroyed
-        // before this async lambda fires.
-        juce::Component::SafePointer<juce::StandaloneFilterWindow> safeSfw { sfw };
+        // X11 size lock: peer keeps windowIsResizable or WM hides hints;
+        // min==max constrainer pins do the locking. Hosts use legacy path.
+        juce::Component::SafePointer<juce::ResizableWindow> safeSfw { sfw };
         juce::Component::SafePointer<PapaloteAudioProcessorEditor> safeThis { this };
         juce::MessageManager::callAsync ([safeSfw, safeThis]()
         {
             if (safeSfw == nullptr || safeThis == nullptr)
                 return;
-            safeSfw->setUsingNativeTitleBar (true);
-            safeSfw->setResizable (false, false);
-            safeThis->setSize ((int) (W * safeThis->uiScale), (int) (H * safeThis->uiScale));
+            const int w = juce::roundToInt (W * safeThis->uiScale);
+            const int h = juce::roundToInt (H * safeThis->uiScale);
+            if (isInStandaloneApp (safeThis.getComponent()))
+            {
+                if (! safeSfw->isResizable())
+                    safeSfw->setResizable (true, false);
+                safeSfw->setUsingNativeTitleBar (true); // no-op if already set
+                // Outer accounting: live frame in.
+                const auto frame = getNativeFrameSize (safeSfw.getComponent());
+                const int outerW = juce::jmax (1, w + frame.x);
+                const int outerH = juce::jmax (1, h + frame.y);
+                if (auto* c = safeSfw->getConstrainer())
+                    c->setSizeLimits (outerW, outerH, outerW, outerH);
+                safeThis->setSize (w, h);
+                safeSfw->setSize (outerW, outerH);
+            }
+            else
+            {
+                safeSfw->setUsingNativeTitleBar (true); // no-op if already set
+                safeSfw->setResizable (false, false);
+                safeSfw->setSize (w, h);
+            }
         });
+
+        // Windows: force 1:1 physical scaling (OS display scale off).
+       #if JUCE_WINDOWS
+        if (auto* peer = getPeer())
+            peer->setCustomPlatformScaleFactor (1.0f);
+       #endif
     }
 }
 
@@ -448,14 +531,32 @@ void PapaloteAudioProcessorEditor::applyZoom (float scale)
 
     updateZoomLimits();
 
-    const auto target = juce::Rectangle<int> (0, 0,
-                                              juce::roundToInt (W * uiScale),
-                                              juce::roundToInt (H * uiScale));
-    setSize (target.getWidth(), target.getHeight());
+    const int pixW = juce::roundToInt (W * uiScale);
+    const int pixH = juce::roundToInt (H * uiScale);
 
+    // X11: frame lives inside the outer window, so add it back; the client
+    // then lands exactly on the editor size (peer frame size stays empty).
+    const auto frame = getNativeFrameSize (isInStandaloneApp (this)
+                                           ? getTopLevelComponent() : nullptr);
+
+    const int outerW = juce::jmax (1, pixW + frame.x);
+    const int outerH = juce::jmax (1, pixH + frame.y);
+
+    // Refresh the window pin BEFORE resizing (WM publishes pinned min==max).
     if (isInStandaloneApp (this))
         if (auto* tl = getTopLevelComponent())
-            tl->setSize (target.getWidth(), target.getHeight());
+            if (tl != this)
+                if (auto* rw = dynamic_cast<juce::ResizableWindow*> (tl))
+                    if (auto* c = rw->getConstrainer())
+                        c->setSizeLimits (outerW, outerH, outerW, outerH);
+
+    setSize (pixW, pixH);
+
+    // Follow the editor size exactly (outer == editor + frame).
+    if (isInStandaloneApp (this))
+        if (auto* tl = getTopLevelComponent())
+            if (tl != this)
+                tl->setSize (outerW, outerH);
 
     resized();
     repaint();
@@ -463,10 +564,18 @@ void PapaloteAudioProcessorEditor::applyZoom (float scale)
 
 void PapaloteAudioProcessorEditor::updateZoomLimits()
 {
-    setResizeLimits (juce::roundToInt (W * AppConstants::ZOOM_MIN),
-                     juce::roundToInt (H * AppConstants::ZOOM_MIN),
-                     juce::roundToInt (W * AppConstants::ZOOM_MAX),
-                     juce::roundToInt (H * AppConstants::ZOOM_MAX));
+    // Standalone: pin constrainer to the zoom size (edge-drag clamp + WM
+    // hints). Hosts keep the zoom range for host-managed sizing.
+    if (isInStandaloneApp (this))
+        setResizeLimits (juce::roundToInt (W * uiScale),
+                         juce::roundToInt (H * uiScale),
+                         juce::roundToInt (W * uiScale),
+                         juce::roundToInt (H * uiScale));
+    else
+        setResizeLimits (juce::roundToInt (W * AppConstants::ZOOM_MIN),
+                         juce::roundToInt (H * AppConstants::ZOOM_MIN),
+                         juce::roundToInt (W * AppConstants::ZOOM_MAX),
+                         juce::roundToInt (H * AppConstants::ZOOM_MAX));
 
     setResizable (false, false);
 }
@@ -491,7 +600,8 @@ void PapaloteAudioProcessorEditor::parameterChanged (const juce::String& paramet
         return;
 
     const int idx = juce::roundToInt (scaleParam->getValue() * (AppConstants::ZOOM_PERCENTS.size() - 1));
-    applyZoom (AppConstants::ZOOM_PERCENTS [juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f);
+    const int clampedIdx = juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx);
+    applyZoom (AppConstants::ZOOM_PERCENTS [(size_t) clampedIdx] / 100.0f);
 }
 
 void PapaloteAudioProcessorEditor::layoutControls (int w, int h)
@@ -576,11 +686,24 @@ void PapaloteAudioProcessorEditor::layoutControls (int w, int h)
         {
             const int rowY = m.cardY + m.titleH + rowPaddingY
                            + i * (m.labelH + m.sliderH + m.rowGap);
+
             labels[i]->setBounds (m.cardX + m.contentInset / 2, rowY,
                                   m.cardW - m.contentInset, m.labelH);
             sliders[i]->setBounds (m.cardX + m.contentInset / 2, rowY + m.labelH,
                                    m.cardW - m.contentInset, m.sliderH);
         }
+    }
+
+    {
+        const int xGap       = m.sc (8.0f);
+        const int xRight     = m.cardX + m.cardW - m.contentInset / 2;
+        const int x1         = xRight - m.xButtonW;                       // X-TONE
+        const int x0         = x1 - m.xButtonW - xGap;                    // X-DRIVE
+        const int buttonY    = m.cardY + m.sc (4.0f);
+        const int buttonH    = m.xButtonH;
+
+        xdriveButton.setBounds (x0, buttonY, m.xButtonW, buttonH);
+        xtoneButton.setBounds (x1, buttonY, m.xButtonW, buttonH);
     }
 }
 
@@ -588,13 +711,13 @@ int PapaloteAudioProcessorEditor::uiScaleIndex() const
 {
     int best = AppConstants::UI_SCALE_DEFAULT;
     float bestDiff = std::numeric_limits<float>::max();
-    for (int i = 0; i < (int) AppConstants::ZOOM_PERCENTS.size(); ++i)
+    for (size_t i = 0; i < AppConstants::ZOOM_PERCENTS.size(); ++i)
     {
         const float diff = std::fabs (AppConstants::ZOOM_PERCENTS[i] / 100.0f - uiScale);
         if (diff < bestDiff)
         {
             bestDiff = diff;
-            best = i;
+            best = (int) i;
         }
     }
     return best;
@@ -612,18 +735,27 @@ void PapaloteAudioProcessorEditor::showPresetMenu()
 {
     juce::PopupMenu menu;
 
-    const int numPresets = presetManager.getNumberOfPresets();
-    for (int i = 0; i < numPresets; ++i)
-        menu.addItem (i + 1, presetManager.getPresetName (i));
-
-    if (numPresets == 0)
+    if (presetManager.getNumberOfPresets() == 0)
+    {
         menu.addItem (1, "(no presets found)");
+    }
+    else
+    {
+        addPresetLevel (menu, juce::File (presetManager.getPresetDirectory()));
+    }
+
+    menu.addSeparator();
+    menu.addItem (kLoadFromFileId, "Load From File...");
 
     menu.showMenuAsync (
         juce::PopupMenu::Options().withTargetComponent (&presetDisplay),
         [this] (int result)
         {
-            if (result > 0)
+            if (result == kLoadFromFileId)
+            {
+                loadPresetFileDialog();
+            }
+            else if (result > 0)
             {
                 const int index = result - 1;
                 if (presetManager.loadPreset (index))
@@ -632,15 +764,73 @@ void PapaloteAudioProcessorEditor::showPresetMenu()
         });
 }
 
+// File browser for a single .papalote file (any folder, not just presets).
+void PapaloteAudioProcessorEditor::loadPresetFileDialog()
+{
+    auto chooser = std::make_shared<juce::FileChooser> (
+        "Load Preset File",
+        juce::File (presetManager.getPresetDirectory()),
+        "*" + juce::String (PAPALOTE_PRESET_EXTENSION));
+
+    juce::Component::SafePointer<PapaloteAudioProcessorEditor> safeThis { this };
+    chooser->launchAsync (juce::FileBrowserComponent::openMode
+                            | juce::FileBrowserComponent::canSelectFiles,
+        [safeThis, chooser] (const juce::FileChooser& fc)
+        {
+            if (safeThis == nullptr)
+                return;
+            const auto result = fc.getResult();
+            if (result.existsAsFile()
+                && safeThis->presetManager.loadPresetFile (result))
+                safeThis->updatePresetDisplay();
+        });
+}
+
+// Folders under dir become ">> name" submenus (mLocalPresets order, so
+// index+1 IDs stay valid). Empty folders stay hidden.
+void PapaloteAudioProcessorEditor::addPresetLevel (juce::PopupMenu& parent, const juce::File& dir)
+{
+    const int n = presetManager.getNumberOfPresets();
+    juce::Array<juce::File> subdirs;
+    for (int i = 0; i < n; ++i)
+    {
+        const auto f = presetManager.getPresetFile (i);
+        if (! f.isAChildOf (dir))
+            continue;
+        if (f.getParentDirectory() == dir)
+        {
+            parent.addItem (i + 1, presetManager.getPresetName (i));
+        }
+        else
+        {
+            auto child = f.getParentDirectory();
+            while (child.getParentDirectory() != dir)
+                child = child.getParentDirectory();
+            if (! subdirs.contains (child))
+                subdirs.add (child);
+        }
+    }
+    for (auto& sub : subdirs)
+    {
+        juce::PopupMenu sm;
+        addPresetLevel (sm, sub);
+        parent.addSubMenu (">> " + sub.getFileName(), sm);
+    }
+}
+
 enum HamburgerMenuOption
 {
     None = 0,
     Init,
     Save,
     SaveAs,
+    LoadFromFile,
     SetPresetFolder,
     ResetPresetFolder,
     CrtEnabled,
+    CrtStrengthLow,
+    CrtStrengthMedium,
+    CrtStrengthHigh,
     StandaloneAudioSettings,
     StandaloneSaveState,
     StandaloneLoadState,
@@ -653,7 +843,7 @@ static bool isInStandaloneApp (const juce::Component* c)
 {
 #if JucePlugin_Build_Standalone
     return c != nullptr
-        && dynamic_cast<const juce::StandaloneFilterWindow*> (c->getTopLevelComponent()) != nullptr;
+        && dynamic_cast<const juce::PapaloteFilterWindow*> (c->getTopLevelComponent()) != nullptr;
 #else
     return false;
 #endif
@@ -667,26 +857,41 @@ void PapaloteAudioProcessorEditor::showHamburgerMenu()
     menu.addSeparator();
     menu.addItem (HamburgerMenuOption::Save, "Save");
     menu.addItem (HamburgerMenuOption::SaveAs, "Save As...");
+    menu.addItem (HamburgerMenuOption::LoadFromFile, "Load From File...");
     menu.addSeparator();
     menu.addItem (HamburgerMenuOption::SetPresetFolder, "Set Preset Folder");
     menu.addItem (HamburgerMenuOption::ResetPresetFolder, "Reset Preset Folder");
     menu.addSeparator();
-    menu.addItem (HamburgerMenuOption::CrtEnabled,
-                  juce::String ("CRT Enabled - ") + (crtEnabled ? "[X]" : "[ ]"));
+    {
+        juce::PopupMenu crtSub;
+        crtSub.addItem (HamburgerMenuOption::CrtEnabled,
+                        juce::String ("CRT Enabled - ") + (crtEnabled ? "[X]" : "[ ]"));
 
-    menu.addSeparator();
-    menu.addItem (HamburgerMenuOption::About, "About");
+        juce::PopupMenu strengthSub;
+        const int strength = presetManager.getCrtStrength();
+        strengthSub.addItem (HamburgerMenuOption::CrtStrengthLow, "Low",
+                             true, strength == 0);
+        strengthSub.addItem (HamburgerMenuOption::CrtStrengthMedium, "Medium",
+                             true, strength == 1);
+        strengthSub.addItem (HamburgerMenuOption::CrtStrengthHigh, "High",
+                             true, strength == 2);
+        crtSub.addSubMenu (">> Strength", strengthSub);
 
-    menu.addSeparator();
+        menu.addSubMenu (">> CRT Layout", crtSub);
+    }
+
     {
         juce::PopupMenu zoomMenu;
         const int currentIndex = uiScaleIndex();
-        for (int i = 0; i < (int) AppConstants::ZOOM_PERCENTS.size(); ++i)
-            zoomMenu.addItem (HamburgerMenuOption::ZoomBase + i,
+        for (size_t i = 0; i < AppConstants::ZOOM_PERCENTS.size(); ++i)
+            zoomMenu.addItem (HamburgerMenuOption::ZoomBase + (int) i,
                               juce::String ((int) AppConstants::ZOOM_PERCENTS[i]) + "%",
-                              true, i == currentIndex);
+                              true, i == (size_t) currentIndex);
         menu.addSubMenu (">> Zoom", zoomMenu);
     }
+
+    menu.addSeparator();
+    menu.addItem (HamburgerMenuOption::About, "About");
 
     if (isInStandaloneApp (this))
     {
@@ -716,8 +921,8 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
             const float norm = (float) idx / (float) (AppConstants::ZOOM_PERCENTS.size() - 1);
             scaleParam->setValueNotifyingHost (norm);
         }
-        applyZoom (AppConstants::ZOOM_PERCENTS [juce::jlimit (
-            0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx)] / 100.0f);
+        const int clampedIdx = juce::jlimit (0, (int) AppConstants::ZOOM_PERCENTS.size() - 1, idx);
+        applyZoom (AppConstants::ZOOM_PERCENTS [(size_t) clampedIdx] / 100.0f);
         return;
     }
 
@@ -727,6 +932,7 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
         case HamburgerMenuOption::Init:   displayInitPopup();    break;
         case HamburgerMenuOption::Save:   presetManager.savePreset(); break;
         case HamburgerMenuOption::SaveAs: displaySaveAsPopup();  break;
+        case HamburgerMenuOption::LoadFromFile: loadPresetFileDialog(); break;
 
         case HamburgerMenuOption::SetPresetFolder:
         {
@@ -753,13 +959,27 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
             break;
 
         case HamburgerMenuOption::CrtEnabled:
-            crtEnabled = ! crtEnabled;
+        {
+            const bool newState = ! crtEnabled.load();
+            crtEnabled.store (newState);
+            presetManager.setCrtEnabled (newState);
             break;
+        }
+
+        case HamburgerMenuOption::CrtStrengthLow:
+        case HamburgerMenuOption::CrtStrengthMedium:
+        case HamburgerMenuOption::CrtStrengthHigh:
+        {
+            const int strength = selectedId - HamburgerMenuOption::CrtStrengthLow;
+            presetManager.setCrtStrength (strength);
+            crtOverlay.setCrtStrength (strength);
+            break;
+        }
 
         case HamburgerMenuOption::StandaloneAudioSettings:
 #if JucePlugin_Build_Standalone
             if (auto* tl = getTopLevelComponent())
-                if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (tl))
+                if (auto* sfw = dynamic_cast<juce::PapaloteFilterWindow*> (tl))
                     new SettingsWindow (sfw->getPluginHolder()->deviceManager, uiScale);
 #endif
             break;
@@ -767,7 +987,7 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
         case HamburgerMenuOption::StandaloneSaveState:
 #if JucePlugin_Build_Standalone
             if (auto* tl = getTopLevelComponent())
-                if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (tl))
+                if (auto* sfw = dynamic_cast<juce::PapaloteFilterWindow*> (tl))
                     sfw->getPluginHolder()->askUserToSaveState();
 #endif
             break;
@@ -775,7 +995,7 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
         case HamburgerMenuOption::StandaloneLoadState:
 #if JucePlugin_Build_Standalone
             if (auto* tl = getTopLevelComponent())
-                if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (tl))
+                if (auto* sfw = dynamic_cast<juce::PapaloteFilterWindow*> (tl))
                     sfw->getPluginHolder()->askUserToLoadState();
 #endif
             break;
@@ -783,10 +1003,10 @@ void PapaloteAudioProcessorEditor::handleMenuResult (int selectedId)
         case HamburgerMenuOption::StandaloneReset:
 #if JucePlugin_Build_Standalone
             if (auto* tl = getTopLevelComponent())
-                if (auto* sfw = dynamic_cast<juce::StandaloneFilterWindow*> (tl))
+                if (auto* sfw = dynamic_cast<juce::PapaloteFilterWindow*> (tl))
                 {
                     // SafePointer: the window may close before the lambda runs.
-                    juce::Component::SafePointer<juce::StandaloneFilterWindow> safeSfw { sfw };
+                    juce::Component::SafePointer<juce::PapaloteFilterWindow> safeSfw { sfw };
                     juce::MessageManager::callAsync ([safeSfw]
                     {
                         if (safeSfw != nullptr)

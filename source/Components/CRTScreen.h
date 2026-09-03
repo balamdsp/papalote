@@ -5,9 +5,9 @@
 #include "CRTMath.h"
 #include "CRTNoise.h"
 
-// OpenGL (GPU) port of the cool-retro-term shader pipeline (static + dynamic
-// + frame + burn-in passes). Shaders are embedded GLSL 1.20 -- JUCE's default
-// Windows context is a legacy 2.1 compatibility profile.
+// OpenGL port of the cool-retro-term pipeline: UI snapshot -> bloom ->
+// static (curve/RGB/bloom) -> glass frame -> dynamic (jitter/scanlines) ->
+// burn-in -> present. Disabled = raw UI, no tube. GLSL 1.20 (legacy GL 2.1).
 class CRTScreen : public Component, public OpenGLRenderer, private Timer
 {
 public:
@@ -61,6 +61,55 @@ public:
     void setFrameShininess (float amount) noexcept         { frameShininess = jlimit (0.0f, 1.0f, amount); }
     void setJitterYScale (float amount) noexcept           { jitterYScale = jlimit (0.0f, 2.0f, amount); }
 
+    // 0 = Low, 1 = Medium, 2 = High. High = original defaults.
+    void setCrtStrength (int strength) noexcept
+    {
+        strength = jlimit (0, 2, strength);
+
+        if (strength == 0)
+        {
+            bloomIntensity          = 0.45f;
+            scanlineIntensity       = 0.15f;
+            glowingLineIntensity    = 0.08f;
+            flickerIntensity        = 0.03f;
+            burnInIntensity         = 0.0f;
+            curvatureIntensity      = 0.10f;
+            staticNoiseIntensity    = 0.02f;
+            rgbShiftIntensity       = 0.015f;
+            jitterIntensity         = 0.05f;
+            jitterYScale            = 0.05f;
+            horizontalSyncIntensity = 0.0f;
+        }
+        else if (strength == 1)
+        {
+            bloomIntensity          = 0.70f;
+            scanlineIntensity       = 0.25f;
+            glowingLineIntensity    = 0.16f;
+            flickerIntensity        = 0.08f;
+            burnInIntensity         = 0.005f;
+            curvatureIntensity      = 0.18f;
+            staticNoiseIntensity    = 0.05f;
+            rgbShiftIntensity       = 0.03f;
+            jitterIntensity         = 0.16f;
+            jitterYScale            = 0.16f;
+            horizontalSyncIntensity = 0.0f;
+        }
+        else
+        {
+            bloomIntensity          = 0.95f;
+            scanlineIntensity       = 0.35f;
+            glowingLineIntensity    = 0.25f;
+            flickerIntensity        = 0.15f;
+            burnInIntensity         = 0.015f;
+            curvatureIntensity      = 0.25f;
+            staticNoiseIntensity    = 0.08f;
+            rgbShiftIntensity       = 0.05f;
+            jitterIntensity         = 0.30f;
+            jitterYScale            = 0.30f;
+            horizontalSyncIntensity = 0.0f;
+        }
+    }
+
     float getBloomIntensity() const noexcept              { return bloomIntensity; }
     float getScanlineIntensity() const noexcept           { return scanlineIntensity; }
     float getGlowingLineIntensity() const noexcept        { return glowingLineIntensity; }
@@ -78,12 +127,24 @@ public:
 
     bool isCrtEnabled() const noexcept { return enabledFlag == nullptr || enabledFlag->load(); }
 
+    // GL surface pixel scale (2x on Retina); FBOs/snapshots match it.
+    // macOS: JUCE's cached scale stays 1.0 when GL attaches before the AU
+    // view is in a window, so prefer the display scale there.
+    float getPhysicalScale() const noexcept
+    {
+      #if JUCE_MAC
+        if (auto* d = Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+            if (d->scale > 0.0)
+                return (float) d->scale;
+      #endif
+        const double s = openGLContext.getRenderingScale();
+        return (s > 0.0) ? (float) s : 1.0f;
+    }
+
     static constexpr float getFrameSize() noexcept { return kFrameSize; }
 
 private:
-    // Per-frame snapshot produced on the UI thread (timerCallback) and
-    // consumed by the GL render thread. Must be declared before the members
-    // it is initialized from.
+    // UI-thread params for the GL thread (declared first: used in signatures).
     struct Params
     {
         float bloom = 0.0f;
@@ -120,8 +181,10 @@ private:
         if (! openGLContext.isActive())
             return;
 
-        const int w = getWidth();
-        const int h = getHeight();
+        const float renderScale = getPhysicalScale();
+        lastRenderScale.store (renderScale);
+        const int w = jmax (1, roundToInt (getWidth() * renderScale));
+        const int h = jmax (1, roundToInt (getHeight() * renderScale));
         if (screenSource == nullptr || w <= 0 || h <= 0)
             return;
 
@@ -259,8 +322,7 @@ private:
         gl::glBindTexture (gl::GL_TEXTURE_2D, 0);
     }
 
-    // Per-frame "vertex pass" computed on the CPU: no vertex texture fetch,
-    // so no driver-dependent flicker.
+    // CPU "vertex pass": noise-tile sample -> brightness/distortion uniforms.
     void computeVertexPass (float timeSec, float flickering, float horizontalSync,
                             float horizontalSyncStrength,
                             float& vBrightness, float& vDistortionScale, float& vDistortionFreq) const
@@ -363,7 +425,7 @@ private:
 
     static void bindTextureUnit (int unit, GLuint id)
     {
-        gl::glActiveTexture (gl::GL_TEXTURE0 + unit);
+        gl::glActiveTexture ((GLenum) (gl::GL_TEXTURE0 + (GLenum) unit));
         gl::glBindTexture (gl::GL_TEXTURE_2D, id);
     }
 
@@ -375,6 +437,7 @@ private:
 
     void renderBloomPass (const Params& p)
     {
+        juce::ignoreUnused (p);
         bloomFBO->makeCurrentRenderingTarget();
         gl::glViewport (0, 0, bloomFBO->getWidth(), bloomFBO->getHeight());
 
@@ -513,14 +576,17 @@ private:
 
     void presentScene (const Params& p, float timeSec)
     {
-        gl::glViewport (0, 0, getWidth(), getHeight());
+        const float renderScale = getPhysicalScale();
+        const int w = jmax (1, roundToInt (getWidth() * renderScale));
+        const int h = jmax (1, roundToInt (getHeight() * renderScale));
+        gl::glViewport (0, 0, w, h);
 
         presentProgram->use();
         OpenGLShaderProgram::Uniform (*presentProgram, "time").set (timeSec);
         OpenGLShaderProgram::Uniform (*presentProgram, "staticNoise").set (p.staticNoise);
         OpenGLShaderProgram::Uniform (*presentProgram, "scaleNoiseSize")
-            .set ((float) getWidth() * 0.75f / (float) crt::crtNoiseTileSize,
-                  (float) getHeight() * 0.75f / (float) crt::crtNoiseTileSize);
+            .set ((float) w * 0.75f / (float) crt::crtNoiseTileSize,
+                  (float) h * 0.75f / (float) crt::crtNoiseTileSize);
         bindSampler (*presentProgram, "dynamicTexture", 0, dynamicFBO->getTextureID());
         bindSampler (*presentProgram, "frameTexture", 1, frameFBO->getTextureID());
         bindSampler (*presentProgram, "noiseSource", 2, noiseTexture.getTextureID());
@@ -529,7 +595,10 @@ private:
 
     void presentRawUI()
     {
-        gl::glViewport (0, 0, getWidth(), getHeight());
+        const float renderScale = getPhysicalScale();
+        const int w = jmax (1, roundToInt (getWidth() * renderScale));
+        const int h = jmax (1, roundToInt (getHeight() * renderScale));
+        gl::glViewport (0, 0, w, h);
 
         rawUIProgram->use();
         bindSampler (*rawUIProgram, "uiTexture", 0, uiTexture.getTextureID());
@@ -543,7 +612,7 @@ private:
         if (screenSource->getWidth() <= 0 || screenSource->getHeight() <= 0)
             return;
 
-        Image snap = screenSource->createComponentSnapshot (getLocalBounds(), false, 1.0f);
+        Image snap = screenSource->createComponentSnapshot (getLocalBounds(), false, jmax (1.0f, lastRenderScale.load()));
         if (! snap.isValid())
             return;
 
@@ -1073,6 +1142,8 @@ void main()
     int burnWrite = 1;
 
     float lastFrameTime = 0.0f;
+
+    std::atomic<float> lastRenderScale { 1.0f };
 
     bool glAttached = false;
 

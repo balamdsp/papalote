@@ -26,20 +26,23 @@ inline float valueNoiseOctave (const std::vector<float>& lattice, int grid,
     const float tx = smoothstepF (0.0f, 1.0f, fractF (gx));
     const float ty = smoothstepF (0.0f, 1.0f, fractF (gy));
 
-    const float p00 = lattice[y0 * grid + x0];
-    const float p10 = lattice[y0 * grid + x1];
-    const float p01 = lattice[y1 * grid + x0];
-    const float p11 = lattice[y1 * grid + x1];
+    const size_t i00 = (size_t) y0 * (size_t) grid + (size_t) x0;
+    const size_t i10 = (size_t) y0 * (size_t) grid + (size_t) x1;
+    const size_t i01 = (size_t) y1 * (size_t) grid + (size_t) x0;
+    const size_t i11 = (size_t) y1 * (size_t) grid + (size_t) x1;
+
+    const float p00 = lattice[i00];
+    const float p10 = lattice[i10];
+    const float p01 = lattice[i01];
+    const float p11 = lattice[i11];
 
     return mixF (mixF (p00, p10, tx), mixF (p01, p11, tx), ty);
 }
 
 }
 
-// Procedural noise tile for the cool-retro-term noiseSource sampler
-// (512x512 RGBA, tiled with wrap): r = white noise (vertex hsync randval),
-// g/b = coherent value noise (vertex brightness/distortion, pixel jitter X),
-// a = cubed white speckle (pixel static noise + jitter Y).
+// 512x512 RGBA noise tile (wraps): r white, g/b coherent value noise,
+// a cubed speckle.
 inline void buildNoiseTile (Image& tile) noexcept
 {
     constexpr int size = crtNoiseTileSize;

@@ -32,14 +32,13 @@ inline float fractF (float x) noexcept
     return x - std::floor (x);
 }
 
-// Linear interpolation (cool-retro-term's "lint"), t unclamped like QML.
+// QML-style lerp, t unclamped.
 inline float lint (float x, float y, float t) noexcept
 {
     return x + (y - x) * t;
 }
 
-// cool-retro-term's distortCoordinates: barrel/pincushion warp shared by the
-// static, dynamic and frame passes.
+// Barrel/pincushion warp shared by static/dynamic/frame passes.
 inline void distortCoordinates (float coordsX, float coordsY,
                                 float frameSize, float screenCurvature,
                                 float& outX, float& outY) noexcept
@@ -54,14 +53,14 @@ inline void distortCoordinates (float coordsX, float coordsY,
     outY = paddedY + ccY * k;
 }
 
-// cool-retro-term's rand2: fract (sin (dot (v, (12.9898, 78.233))) * 43758.5453)
+// fract(sin(dot(v,(12.9898,78.233)))*43758.5453)
 inline float rand2 (float x, float y) noexcept
 {
     const float s = std::sin (x * 12.9898f + y * 78.233f) * 43758.5453f;
     return fractF (s);
 }
 
-// cool-retro-term's rgb2grey: dot (v, (0.21, 0.72, 0.04))
+// dot(v,(0.21,0.72,0.04))
 inline float rgb2grey (float r, float g, float b) noexcept
 {
     return r * 0.21f + g * 0.72f + b * 0.04f;

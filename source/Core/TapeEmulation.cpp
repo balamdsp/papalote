@@ -2,7 +2,6 @@
 #include <algorithm>
 #include <cmath>
 
-// ── Material → waveshaper type mapping ──────────────────────────────────────
 static const TapeEmulation::TapeModeParameters s_tapeModes[5] =
     {
         {0.4375f, 0.3125f, 0.75f, 0.3125f, 0.0625f, 1, 0},
@@ -17,7 +16,6 @@ TapeEmulation::TapeEmulation()
 
 TapeEmulation::~TapeEmulation() {}
 
-// ── Audio EQ Cookbook — low shelf ──────────────────────────────────────────
 
 void TapeEmulation::computeLowShelf(Biquad& bq, double fc, double gainDb,
                                     double Q, double fs)
@@ -43,7 +41,6 @@ void TapeEmulation::computeLowShelf(Biquad& bq, double fc, double gainDb,
     bq.a2 = a2 / a0;
 }
 
-// ── Audio EQ Cookbook — high shelf ─────────────────────────────────────────
 
 void TapeEmulation::computeHighShelf(Biquad& bq, double fc, double gainDb,
                                      double Q, double fs)
@@ -69,13 +66,16 @@ void TapeEmulation::computeHighShelf(Biquad& bq, double fc, double gainDb,
     bq.a2 = a2 / a0;
 }
 
-// ── Tone filter update ─────────────────────────────────────────────────────
 
-void TapeEmulation::updateToneFilter(float tone, double fs)
+void TapeEmulation::updateToneFilter(float tone, bool extra, double fs)
 {
-    if ((tone == lastTone && fs == lastSampleRate) || fs <= 0.0)
+    // Exact-change guard; fabs form avoids -Wfloat-equal on cached params.
+    const bool sameTone = ! (std::fabs (tone - lastTone) > 0.0f);
+    const bool sameRate = ! (std::fabs (fs - lastSampleRate) > 0.0);
+    if ((sameTone && extra == lastToneExtra && sameRate) || fs <= 0.0)
         return;
     lastTone = tone;
+    lastToneExtra = extra;
     lastSampleRate = fs;
 
     constexpr double loFc = 200.0;
@@ -97,15 +97,20 @@ void TapeEmulation::updateToneFilter(float tone, double fs)
         hiGain = 0.0 * (1.0 - t) + 2.5 * t;     // 0 → +2.5
     }
 
+    if (extra)
+    {
+        loGain *= 3.0;
+        hiGain *= 3.0;
+    }
+
     computeLowShelf(toneShelfLo, loFc, loGain, shelfQ, fs);
     computeHighShelf(toneShelfHi, hiFc, hiGain, shelfQ, fs);
 }
 
-// ── Process ────────────────────────────────────────────────────────────────
 
 void TapeEmulation::updateProcessingRate(double processSampleRate)
 {
-    if (processSampleRate == lastProcessSampleRate || sampleRate <= 0.0)
+    if (! (std::fabs (processSampleRate - lastProcessSampleRate) > 0.0) || sampleRate <= 0.0)
         return;
 
     lastProcessSampleRate = processSampleRate;
@@ -123,15 +128,25 @@ void TapeEmulation::processAudio(float *input, float *output,
                                  float input_trim,
                                  float process_amount,
                                  int tape_type, float wet_dry_mix,
-                                 float tone, int numSamples,
+                                 float tone, bool toneExtra, bool driveExtra,
+                                 int numSamples,
                                  double processSampleRate)
 {
     juce::ignoreUnused(tape_type);
 
-    const float p_dec = process_amount / PROCESS_AMOUNT_MAX;
+    float p_dec = process_amount / PROCESS_AMOUNT_MAX;
+    float drivePre = 1.0f;
+    float driveWet = 1.0f;
+    // X-Drive: hotter push that still leaves Drive-knob travel.
+    if (driveExtra)
+    {
+        p_dec = std::min(p_dec * 2.0f, 1.0f);
+        drivePre = 2.0f;
+        driveWet = 1.25f;
+    }
 
     updateProcessingRate(processSampleRate);
-    updateToneFilter(tone, processSampleRate);
+    updateToneFilter(tone, toneExtra, processSampleRate);
 
     const float hpEff = effective_high_pass_filter_coefficient;
     const float lpEff = effective_low_pass_filter_coefficient;
@@ -148,10 +163,10 @@ void TapeEmulation::processAudio(float *input, float *output,
 
         const float pre_sat = (pre_saturation_bypass == 0) ? dry_sample : filtered;
 
-        const float sig1 = filtered;
+        const float sig1 = filtered * drivePre;
         const float sat1 = papalote::satcurves::process(saturation_type, sig1, adaaStage1, p_dec);
 
-        const float sig2 = sat1 * saturation_blend_1 + pre_sat;
+        const float sig2 = (sat1 * saturation_blend_1 + pre_sat) * drivePre;
         const float sat2 = papalote::satcurves::process(saturation_type, sig2, adaaStage2, p_dec);
 
         low_pass_filter_state += (sat2 - low_pass_filter_state)
@@ -160,7 +175,7 @@ void TapeEmulation::processAudio(float *input, float *output,
         double toneOut = toneShelfLo.process((double) low_pass_filter_state);
         toneOut = toneShelfHi.process(toneOut);
 
-        float wet = p_dec * ((float) toneOut - dry_sample * saturation_blend_2);
+        float wet = p_dec * ((float) toneOut - dry_sample * saturation_blend_2) * driveWet;
         if (tape_model_type == 3)
             wet *= 0.5f;
 
@@ -199,6 +214,7 @@ void TapeEmulation::resetPreviousState()
     toneShelfLo.reset();
     toneShelfHi.reset();
     lastTone = -1.0f;
+    lastToneExtra = false;
     lastSampleRate = -1.0;
     lastProcessSampleRate = -1.0;
     effective_high_pass_filter_coefficient = 0.0f;

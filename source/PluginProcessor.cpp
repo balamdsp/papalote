@@ -38,6 +38,8 @@ PapaloteAudioProcessor::createParameterLayout()
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         AppConstants::DRIVE_ID, "Drive",
         AppConstants::DRIVE_MIN, AppConstants::DRIVE_MAX, AppConstants::DRIVE_DEFAULT));
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        AppConstants::XDRIVE_ID, "X-Drive", false));
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         AppConstants::DRY_WET_ID, "Dry/Wet",
         AppConstants::DRY_WET_MIN, AppConstants::DRY_WET_MAX, AppConstants::DRY_WET_DEFAULT));
@@ -45,6 +47,8 @@ PapaloteAudioProcessor::createParameterLayout()
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         AppConstants::TONE_ID, "Tone",
         AppConstants::TONE_MIN, AppConstants::TONE_MAX, AppConstants::TONE_DEFAULT));
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        AppConstants::XTONE_ID, "X-Tone", false));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         AppConstants::CLIP_ID, "Out", dbRange, AppConstants::DB_DEFAULT));
@@ -57,10 +61,10 @@ PapaloteAudioProcessor::createParameterLayout()
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         AppConstants::BYPASS_ID, "Bypass", false));
 
-    // Choice index 0 = "x1" (no module); 1..4 map to 2x/4x/8x/16x factors.
+    // Choice index 0 = "1x" (no module); 1..4 map to 2x/4x/8x/16x factors.
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         AppConstants::OS_FACTOR_ID, "Oversampling",
-        juce::StringArray { "x1", "2x", "4x", "8x", "16x" },
+        juce::StringArray { "1x", "2x", "4x", "8x", "16x" },
         AppConstants::OS_FACTOR_DEFAULT_INDEX));
 
     juce::StringArray scaleChoices;
@@ -205,6 +209,8 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     const float drive          = apvts.getRawParameterValue(AppConstants::DRIVE_ID)->load();
     const float dryWet         = apvts.getRawParameterValue(AppConstants::DRY_WET_ID)->load();
     const float tone           = apvts.getRawParameterValue(AppConstants::TONE_ID)->load();
+    const bool  toneExtra      = apvts.getRawParameterValue(AppConstants::XTONE_ID)->load() > 0.5f;
+    const bool  driveExtra     = apvts.getRawParameterValue(AppConstants::XDRIVE_ID)->load() > 0.5f;
 
     const double sampleRate = getSampleRate();
 
@@ -236,7 +242,7 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             ptrTapeEmulation[ch]->processAudio(
                 data, data,
                 inputTrimGain,
-                drive, tapeType, dryWet, tone,
+                drive, tapeType, dryWet, tone, toneExtra, driveExtra,
                 static_cast<int>(upBlock.getNumSamples()),
                 processSampleRate);
         }
@@ -259,7 +265,7 @@ void PapaloteAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             ptrTapeEmulation[ch]->processAudio(
                 data, data,
                 inputTrimGain,
-                drive, tapeType, dryWet, tone,
+                drive, tapeType, dryWet, tone, toneExtra, driveExtra,
                 buffer.getNumSamples(),
                 sampleRate);
         }

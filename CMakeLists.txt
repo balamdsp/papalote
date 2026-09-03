@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Papalote VERSION 0.8.2)
+project(Papalote VERSION 0.8.3)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -45,27 +45,43 @@ target_compile_definitions(Papalote
 
 target_sources(Papalote
     PRIVATE
-        source/CustomLookAndFeel.h
-        source/SaturationCurves.h
-        source/SaturationCurves.cpp
-        source/TapeEmulation.cpp
-        source/TapeEmulation.h
+        source/Components/CustomLookAndFeel.h
+        source/Core/SaturationCurves.h
+        source/Core/SaturationCurves.cpp
+        source/Core/TapeEmulation.cpp
+        source/Core/TapeEmulation.h
         source/PluginProcessor.h
         source/PluginProcessor.cpp
         source/PluginEditor.cpp
         source/PluginEditor.h
-        source/PresetManager.h
-        source/PresetManager.cpp
+        source/Helpers/PresetManager.h
+        source/Helpers/PresetManager.cpp
+        source/Helpers/PapaloteFrameExtents.cpp
 )
+
+# PapaloteFrameExtents.cpp talks Xlib directly (Linux standalone frame).
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(Papalote PRIVATE X11)
+endif()
 
 juce_add_binary_data(Papalote_BinaryData
     HEADER_NAME "BinaryData.h"
     NAMESPACE "BinaryData"
     SOURCES
-        source/VT323-Regular.ttf
+        source/Fonts/VT323-Regular.ttf
 )
 
 target_link_libraries(Papalote PRIVATE Papalote_BinaryData)
+
+# Custom standalone entry (native OS title bar).
+# JUCE's module TU then only provides the main() and expects us to define
+# juce_CreateApplication() via PapaloteStandaloneApp in CustomStandalone.cpp.
+target_compile_definitions(Papalote_Standalone PRIVATE
+    JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1
+)
+target_sources(Papalote_Standalone PRIVATE
+    source/Standalone/CustomStandalone.cpp
+)
 
 target_link_libraries(Papalote
     PRIVATE
